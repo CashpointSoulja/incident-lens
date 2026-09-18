@@ -1,0 +1,286 @@
+{
+  "capabilities": [
+    {
+      "id": "cap-nexus-1",
+      "product": "Nexus",
+      "name": "Interactive Assistant",
+      "description": "Talk to the agent like a teammate to ask questions, request info, and take actions directly in Slack.",
+      "sourceUrl": "https://incident.io/agent"
+    },
+    {
+      "id": "cap-nexus-2",
+      "product": "Nexus",
+      "name": "Autonomous Monitoring",
+      "description": "Proactively monitors for new information, surfaces context you haven't thought to look for, and takes action.",
+      "sourceUrl": "https://incident.io/agent"
+    },
+    {
+      "id": "cap-nexus-3",
+      "product": "Nexus",
+      "name": "Context-Aware Coding Agents",
+      "description": "Debug directly in your coding agent of choice using the intelligence from the platform.",
+      "sourceUrl": "https://incident.io/agent"
+    },
+    {
+      "id": "cap-nexus-4",
+      "product": "Nexus",
+      "name": "Engineer-Built Skills",
+      "description": "House your team's custom skills and teach the agent how your team works with plug-in AI connectors.",
+      "sourceUrl": "https://incident.io/agent"
+    },
+    {
+      "id": "cap-oncall-1",
+      "product": "On-call",
+      "name": "Flexible Alert Routing",
+      "description": "Route alerts to the right person or team automatically using pre-built integrations or custom HTTP webhooks.",
+      "sourceUrl": "https://incident.io/on-call"
+    },
+    {
+      "id": "cap-oncall-2",
+      "product": "On-call",
+      "name": "Shadow Scheduling",
+      "description": "Create complex on-call schedules, from follow-the-sun to shadow scheduling for easy onboarding.",
+      "sourceUrl": "https://incident.io/on-call"
+    },
+    {
+      "id": "cap-oncall-3",
+      "product": "On-call",
+      "name": "AI Alert Intelligence",
+      "description": "Reduces noise by automatically grouping related alerts and intelligently summarizing them to prevent alert fatigue.",
+      "sourceUrl": "https://incident.io/on-call"
+    },
+    {
+      "id": "cap-oncall-4",
+      "product": "On-call",
+      "name": "Holiday Feed Sync",
+      "description": "Sync with your HR systems to automatically handle out-of-office dates and seamlessly adjust schedules.",
+      "sourceUrl": "https://incident.io/on-call"
+    },
+    {
+      "id": "cap-oncall-5",
+      "product": "On-call",
+      "name": "Slack Group Sync",
+      "description": "Automatically synchronize on-call rotations with Slack user groups so you can easily ping the right people.",
+      "sourceUrl": "https://incident.io/on-call"
+    },
+    {
+      "id": "cap-inv-1",
+      "product": "Investigations",
+      "name": "Agentic Root Cause Analysis",
+      "description": "Instantly surfaces an evidence-backed hypothesis identifying what broke and why the moment an incident starts.",
+      "sourceUrl": "https://incident.io/investigations"
+    },
+    {
+      "id": "cap-inv-2",
+      "product": "Investigations",
+      "name": "Blast Radius Mapping",
+      "description": "Automatically identifies and visualizes the impact area to understand severity before you begin investigating.",
+      "sourceUrl": "https://incident.io/investigations"
+    },
+    {
+      "id": "cap-inv-3",
+      "product": "Investigations",
+      "name": "Parallel Debugging",
+      "description": "The agent runs parallel threads, pulling telemetry and code changes without leaving your terminal.",
+      "sourceUrl": "https://incident.io/investigations"
+    },
+    {
+      "id": "cap-inv-4",
+      "product": "Investigations",
+      "name": "Pull Request Drafting",
+      "description": "The agent securely drafts PR fixes based on findings for you to review and merge, never taking action without you.",
+      "sourceUrl": "https://incident.io/investigations"
+    },
+    {
+      "id": "cap-resp-1",
+      "product": "Response",
+      "name": "Slack-Native Incident Command",
+      "description": "Create and run incidents in seconds using /incident right from Slack or Microsoft Teams.",
+      "sourceUrl": "https://incident.io/respond"
+    },
+    {
+      "id": "cap-resp-2",
+      "product": "Response",
+      "name": "Workflow Automation",
+      "description": "Encode and automate key runbooks to operationalize your response and ensure consistent processes.",
+      "sourceUrl": "https://incident.io/respond"
+    },
+    {
+      "id": "cap-resp-3",
+      "product": "Response",
+      "name": "Automated Communication",
+      "description": "Share structured incident updates across Slack, SMS, and email to keep stakeholders informed.",
+      "sourceUrl": "https://incident.io/respond"
+    },
+    {
+      "id": "cap-resp-4",
+      "product": "Response",
+      "name": "AI-Native Post-Mortems",
+      "description": "Automatically draft post-mortems with a rich timeline and context to focus on learning rather than writing.",
+      "sourceUrl": "https://incident.io/respond"
+    },
+    {
+      "id": "cap-resp-5",
+      "product": "Response",
+      "name": "Private Incidents",
+      "description": "Restrict access and lock down sensitive information with dedicated privacy controls during critical events.",
+      "sourceUrl": "https://incident.io/respond"
+    },
+    {
+      "id": "cap-stat-1",
+      "product": "Status Pages",
+      "name": "Public, Private & Internal Pages",
+      "description": "Provide tailored status pages for different audiences, from all customers to select partners or internal teams.",
+      "sourceUrl": "https://incident.io/status-pages"
+    },
+    {
+      "id": "cap-stat-2",
+      "product": "Status Pages",
+      "name": "Workflow-Integrated Updates",
+      "description": "Automate status updates entirely or use pre-approved messaging templates right from your incident workflow.",
+      "sourceUrl": "https://incident.io/status-pages"
+    },
+    {
+      "id": "cap-stat-3",
+      "product": "Status Pages",
+      "name": "Multi-Channel Subscriptions",
+      "description": "Allow customers to subscribe to updates for specific components via email, Slack, and RSS.",
+      "sourceUrl": "https://incident.io/status-pages"
+    },
+    {
+      "id": "cap-stat-4",
+      "product": "Status Pages",
+      "name": "Customer Support Integration",
+      "description": "Connect directly with support tools like Intercom to keep agents aligned with engineering context.",
+      "sourceUrl": "https://incident.io/status-pages"
+    }
+  ],
+  "integrations": [
+    {
+      "id": "int-slack",
+      "name": "Slack",
+      "category": "Issue Tracking",
+      "sourceUrl": "https://incident.io/incident-response-slack"
+    },
+    {
+      "id": "int-teams",
+      "name": "Microsoft Teams",
+      "category": "Issue Tracking",
+      "sourceUrl": "https://incident.io/incident-response-microsoft-teams"
+    },
+    {
+      "id": "int-pagerduty",
+      "name": "PagerDuty",
+      "category": "Alerts and Paging",
+      "sourceUrl": "https://docs.incident.io/integrations/pagerduty"
+    },
+    {
+      "id": "int-opsgenie",
+      "name": "Opsgenie",
+      "category": "Alerts and Paging",
+      "sourceUrl": "https://docs.incident.io/integrations/opsgenie"
+    },
+    {
+      "id": "int-datadog",
+      "name": "Datadog",
+      "category": "Alerts and Paging",
+      "sourceUrl": "https://docs.incident.io/integrations/datadog"
+    },
+    {
+      "id": "int-github",
+      "name": "GitHub",
+      "category": "Issue Tracking",
+      "sourceUrl": "https://docs.incident.io/integrations/github"
+    },
+    {
+      "id": "int-gitlab",
+      "name": "GitLab",
+      "category": "Issue Tracking",
+      "sourceUrl": "https://docs.incident.io/integrations/gitlab"
+    },
+    {
+      "id": "int-jira",
+      "name": "Jira",
+      "category": "Issue Tracking",
+      "sourceUrl": "https://docs.incident.io/integrations/jira"
+    },
+    {
+      "id": "int-linear",
+      "name": "Linear",
+      "category": "Issue Tracking",
+      "sourceUrl": "https://docs.incident.io/integrations/linear"
+    },
+    {
+      "id": "int-zendesk",
+      "name": "Zendesk",
+      "category": "Issue Tracking",
+      "sourceUrl": "https://docs.incident.io/integrations/zendesk"
+    },
+    {
+      "id": "int-backstage",
+      "name": "Backstage",
+      "category": "Service Catalog",
+      "sourceUrl": "https://docs.incident.io/catalog/backstage"
+    },
+    {
+      "id": "int-cortex",
+      "name": "Cortex",
+      "category": "Service Catalog",
+      "sourceUrl": "https://docs.incident.io/catalog/cortex"
+    },
+    {
+      "id": "int-sentry",
+      "name": "Sentry",
+      "category": "Alerts and Paging",
+      "sourceUrl": "https://docs.incident.io/integrations/sentry"
+    },
+    {
+      "id": "int-splunk",
+      "name": "Splunk",
+      "category": "Alerts and Paging",
+      "sourceUrl": "https://docs.incident.io/integrations/splunk"
+    },
+    {
+      "id": "int-newrelic",
+      "name": "New Relic",
+      "category": "Alerts and Paging",
+      "sourceUrl": "https://docs.incident.io/incidents/auto-create"
+    },
+    {
+      "id": "int-zoom",
+      "name": "Zoom",
+      "category": "Video and Documents",
+      "sourceUrl": "https://docs.incident.io/integrations/zoom"
+    },
+    {
+      "id": "int-googlemeet",
+      "name": "Google Meet",
+      "category": "Video and Documents",
+      "sourceUrl": "https://docs.incident.io/integrations/google-meet"
+    },
+    {
+      "id": "int-notion",
+      "name": "Notion",
+      "category": "Video and Documents",
+      "sourceUrl": "https://docs.incident.io/integrations/notion"
+    },
+    {
+      "id": "int-confluence",
+      "name": "Confluence",
+      "category": "Video and Documents",
+      "sourceUrl": "https://docs.incident.io/integrations/confluence"
+    },
+    {
+      "id": "int-bamboohr",
+      "name": "BambooHR",
+      "category": "HR Systems",
+      "sourceUrl": "https://docs.incident.io/on-call/holidays"
+    },
+    {
+      "id": "int-aws",
+      "name": "AWS",
+      "category": "Everything Else",
+      "sourceUrl": "https://docs.incident.io/admin/audit-logs"
+    }
+  ]
+}
