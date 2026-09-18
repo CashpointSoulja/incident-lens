@@ -349,55 +349,64 @@
     },
     {
       "account": {
-        "id": "id_246661f4",
-        "domain": "vercel.com",
-        "name": "Vercel",
+        "id": "id_5fba6a50",
+        "domain": "render.com",
+        "name": "Render",
         "industry": "Cloud Computing",
         "createdAt": "2026-09-18T00:00:00Z",
         "alreadyCustomer": true
       },
       "evidences": [
         {
-          "id": "id_546749ce",
-          "accountId": "id_246661f4",
-          "claim": "Status page is powered by Atlassian Statuspage, but incident.io's engineering blog confirms Vercel is a customer of incident.io.",
-          "url": "https://incident.io/blog/how-we-built-status-pages",
+          "id": "id_68070328",
+          "accountId": "id_5fba6a50",
+          "claim": "Status page is powered by Atlassian Statuspage.",
+          "url": "https://status.render.com/",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
         },
         {
-          "id": "id_d4d774a3",
-          "accountId": "id_246661f4",
-          "claim": "Detailed postmortem published regarding a Next.js middleware bypass and CVE resolution.",
-          "url": "https://vercel.com/blog/postmortem-on-next-js-middleware-bypass",
+          "id": "id_c8997a09",
+          "accountId": "id_5fba6a50",
+          "claim": "Render has been an incident.io customer for years, as confirmed by CEO Anurag Goel and a published case study.",
+          "url": "https://www.casestudies.com/company/incidentio/case-study/industry-interviews-uma-chingunde-vice-president-of-engineering-at-render",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
         },
         {
-          "id": "id_92ae6e73",
-          "accountId": "id_246661f4",
-          "claim": "Postmortem describing a service disruption involving their Edge Middleware and global traffic routing.",
-          "url": "https://vercel.com/blog/update-regarding-vercel-service-disruption-on-august-7-2024",
+          "id": "id_fb2d04e2",
+          "accountId": "id_5fba6a50",
+          "claim": "Published a detailed postmortem regarding an extended service disruption in March 2024 caused by an unintended workload restart affecting PostgreSQL and Redis.",
+          "url": "https://render.com/blog/root-cause-analysis-extended-service-disruption-3-26-24",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
         },
         {
-          "id": "id_564032af",
-          "accountId": "id_246661f4",
-          "claim": "Hiring Site Reliability Engineers to manage their Compute infrastructure, focusing on Kubernetes, Linux, and AWS.",
-          "url": "https://builtin.com/job/site-reliability-engineer-compute/3558696",
+          "id": "id_17daf796",
+          "accountId": "id_5fba6a50",
+          "claim": "Engineering blog details a staging environment incident caused by long-running PostgreSQL queries blocking database migrations.",
+          "url": "https://render.com/blog/postgresql-simple-query-big-problem",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
         },
         {
-          "id": "id_e5fb6d26",
-          "accountId": "id_246661f4",
-          "claim": "Engineering blog detailed migrating the database behind builds to DynamoDB.",
-          "url": "https://vercel.com/blog/how-we-migrated-the-database-behind-every-vercel-build",
+          "id": "id_ce2c8c3b",
+          "accountId": "id_5fba6a50",
+          "claim": "Public job posting for a Software Engineer, Compute Infrastructure mentions operating large-scale Kubernetes clusters across multiple cloud providers and participating in an on-call rotation.",
+          "url": "https://jobs.ashbyhq.com/render/d52dc923-1641-4386-b8ba-5c15e1d7028d",
+          "observedAt": "2026-09-18",
+          "confidence": "high",
+          "kind": "observed"
+        },
+        {
+          "id": "id_29a286a3",
+          "accountId": "id_5fba6a50",
+          "claim": "Engineering blog discusses their architecture using Render Workflows, Cloudflare, Dash0, and GitHub Actions for automated deployments.",
+          "url": "https://render.com/blog/blue-green-deployments-on-render-with-canary-traffic-splitting",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -405,70 +414,80 @@
       ],
       "signals": [
         {
-          "id": "id_b971896f",
-          "accountId": "id_246661f4",
+          "id": "id_017e565d",
+          "accountId": "id_5fba6a50",
           "label": "incident.io Customer",
           "evidenceIds": [
-            "id_546749ce"
+            "id_c8997a09"
           ],
           "strength": 5
         },
         {
-          "id": "id_90fb8b03",
-          "accountId": "id_246661f4",
-          "label": "AWS & DynamoDB Stack",
+          "id": "id_b8980f8a",
+          "accountId": "id_5fba6a50",
+          "label": "Atlassian Statuspage",
           "evidenceIds": [
-            "id_564032af",
-            "id_e5fb6d26"
+            "id_68070328"
           ],
           "strength": 5
         },
         {
-          "id": "id_35ba26e9",
-          "accountId": "id_246661f4",
-          "label": "Edge Infrastructure & Global Routing",
+          "id": "id_60cf615f",
+          "accountId": "id_5fba6a50",
+          "label": "Kubernetes & Multi-Cloud Infrastructure",
           "evidenceIds": [
-            "id_92ae6e73"
+            "id_ce2c8c3b"
           ],
           "strength": 5
         },
         {
-          "id": "id_b7ba9b2e",
-          "accountId": "id_246661f4",
-          "label": "Mature SRE Practice",
+          "id": "id_eb7b5893",
+          "accountId": "id_5fba6a50",
+          "label": "Managed PostgreSQL & Redis",
           "evidenceIds": [
-            "id_564032af"
+            "id_fb2d04e2",
+            "id_17daf796"
+          ],
+          "strength": 5
+        },
+        {
+          "id": "id_926bf4e3",
+          "accountId": "id_5fba6a50",
+          "label": "Complex CI/CD Workflows",
+          "evidenceIds": [
+            "id_29a286a3"
           ],
           "strength": 4
         }
       ],
       "hypotheses": [
         {
-          "id": "id_175f7fb7",
-          "accountId": "id_246661f4",
-          "statement": "Because they manage globally distributed edge infrastructure, they might need advanced incident routing to handle cascading failures across regions.",
+          "id": "id_a923db43",
+          "accountId": "id_5fba6a50",
+          "statement": "Given they already use incident.io internally, could they benefit from adopting the incident.io Status Page to replace their Atlassian Statuspage and consolidate tools?",
           "evidenceIds": [
-            "id_92ae6e73",
-            "id_564032af"
+            "id_68070328",
+            "id_c8997a09"
           ],
           "status": "hypothesis"
         },
         {
-          "id": "id_eef0491d",
-          "accountId": "id_246661f4",
-          "statement": "Since they already use incident.io internally, they could be a strong candidate to adopt On-call or other newly released capabilities.",
+          "id": "id_c2a00125",
+          "accountId": "id_5fba6a50",
+          "statement": "Because they operate multi-cloud Kubernetes clusters at scale, how might advanced routing and on-call escalation policies help their SRE team manage complex cross-region incidents?",
           "evidenceIds": [
-            "id_546749ce"
+            "id_ce2c8c3b"
           ],
           "status": "hypothesis"
         },
         {
-          "id": "id_75d8d930",
-          "accountId": "id_246661f4",
-          "statement": "With highly publicized postmortems, they might value automated public communications to streamline their external incident reporting.",
+          "id": "id_5f6bd4cc",
+          "accountId": "id_5fba6a50",
+          "statement": "With their focus on managed PostgreSQL and Redis, would deeper workflow integrations with Dash0 and Cloudflare improve their ability to diagnose and mitigate data layer bottlenecks?",
           "evidenceIds": [
-            "id_d4d774a3",
-            "id_92ae6e73"
+            "id_fb2d04e2",
+            "id_17daf796",
+            "id_29a286a3"
           ],
           "status": "hypothesis"
         }
@@ -477,47 +496,50 @@
         {
           "order": 1,
           "phase": "alert",
-          "text": "An alert triggers indicating high error rates on Edge Middleware invocations.",
+          "text": "Dash0 detects elevated error rates and latency across the managed PostgreSQL clusters.",
           "personalizedFrom": [
-            "id_35ba26e9"
+            "id_eb7b5893",
+            "id_926bf4e3"
           ]
         },
         {
           "order": 2,
           "phase": "routing",
-          "text": "The incident.io platform pages the Compute SRE team on-call.",
+          "text": "The alert triggers an escalation in incident.io, paging the on-call Compute Infrastructure SRE.",
           "personalizedFrom": [
-            "id_b7ba9b2e",
-            "id_b971896f"
+            "id_017e565d",
+            "id_60cf615f"
           ]
         },
         {
           "order": 3,
           "phase": "investigation",
-          "text": "SREs investigate global traffic routing configurations and DynamoDB metrics on AWS.",
+          "text": "The engineer investigates Kubernetes node metrics and active queries using pg_stat_activity.",
           "personalizedFrom": [
-            "id_90fb8b03",
-            "id_35ba26e9"
+            "id_60cf615f",
+            "id_eb7b5893"
           ]
         },
         {
           "order": 4,
           "phase": "response",
-          "text": "The team implements a global failover to a secondary compute region.",
+          "text": "The team runs an automated runbook via Render Workflows to terminate blocking transactions and restore database performance.",
           "personalizedFrom": [
-            "id_35ba26e9"
+            "id_926bf4e3"
           ]
         },
         {
           "order": 5,
           "phase": "customer-update",
-          "text": "A degraded performance notice is posted externally to notify users of Edge Middleware issues.",
-          "personalizedFrom": []
+          "text": "They post an update to their Atlassian Statuspage acknowledging degraded performance for services with attached disks.",
+          "personalizedFrom": [
+            "id_b8980f8a"
+          ]
         },
         {
           "order": 6,
           "phase": "postmortem",
-          "text": "A deep-dive postmortem is published detailing the root cause of the edge routing failure.",
+          "text": "A detailed postmortem is published on their engineering blog explaining the scale of the event and the rate limits encountered.",
           "personalizedFrom": []
         }
       ]
