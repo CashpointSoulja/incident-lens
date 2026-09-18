@@ -1,0 +1,14 @@
+:root {
+  --orange: #F25533;      /* actions / live state only */
+  --charcoal: #161618;
+  --white: #ffffff;
+  --burgundy: #5A0A17;    /* deep panels */
+  --canvas: #F8F5F0;      /* warm off-white */
+  --cream: #F1EBE2;       /* borders */
+  --sand: #E4D9C8;        /* borders */
+  --serif: "Georgia", "Times New Roman", serif;
+  --sans: -apple-system, "Inter", "Helvetica Neue", Arial, sans-serif;
+  --radius: 14px;
+  --chip-radius: 999px;
+  --space: clamp(16px, 4vw, 32px);
+}
