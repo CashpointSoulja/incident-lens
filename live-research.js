@@ -49,7 +49,7 @@ async function assertPublicHost(host) {
 async function fetchPage(url, fetchImpl = fetch) {
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('Unsupported URL protocol.');
-  await assertPublicHost(parsed.hostname);
+  try { await assertPublicHost(parsed.hostname); } catch { return null; } // unresolvable or non-public host: treat as an absent page, never abort the whole lookup
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
