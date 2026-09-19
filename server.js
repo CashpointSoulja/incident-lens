@@ -9,8 +9,10 @@ export default async function handler(req, res) {
   try {
     let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
     if (p === '/') p = '/index.html';
-    const file = normalize(join(ROOT, 'public', p));
-    if (!file.startsWith(join(ROOT, 'public'))) { res.writeHead(403); return res.end(); }
+    // Fixtures and the product knowledge base live in /data (one source of truth, also read by scripts).
+    const base = p.startsWith('/data/') ? ROOT : join(ROOT, 'public');
+    const file = normalize(join(base, p));
+    if (!file.startsWith(join(ROOT, 'public')) && !file.startsWith(join(ROOT, 'data'))) { res.writeHead(403); return res.end(); }
     const body = await readFile(file);
     res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
     res.end(body);
