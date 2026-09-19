@@ -13,6 +13,9 @@ export default async function handler(req, res) {
     if (requestUrl.pathname === '/api/research') {
       if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed.' });
       const domain = requestUrl.searchParams.get('domain') || '';
+      if (process.env.LIVE_RESEARCH_ENABLED !== '1') {
+        return sendJson(res, 422, { error: 'Live lookup is paused for this demo - pick one of the preloaded examples below.' });
+      }
       try { return sendJson(res, 200, await researchDomain(domain)); }
       catch (error) { return sendJson(res, 422, { error: error?.message || 'Live research failed.' }); }
     }
