@@ -6,9 +6,13 @@
   --canvas: #F8F5F0;      /* warm off-white */
   --cream: #F1EBE2;       /* borders */
   --sand: #E4D9C8;        /* borders */
-  --serif: "Georgia", "Times New Roman", serif;
-  --sans: -apple-system, "Inter", "Helvetica Neue", Arial, sans-serif;
-  --radius: 14px;
+  --serif: "Newsreader", "Iowan Old Style", Georgia, serif;   /* display: titles, openers, conclusions */
+  --sans: "Inter", -apple-system, "Helvetica Neue", Arial, sans-serif; /* everything functional */
+  --hand: "Kalam", "Segoe Print", "Bradley Hand", cursive;    /* margin notes only */
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; /* source URLs, timestamps */
+  --ink-2: #4a453f;       /* secondary text */
+  --ink-3: #6b645c;       /* tertiary text */
+  --radius: 18px;
   --chip-radius: 999px;
   --space: clamp(16px, 4vw, 32px);
 }

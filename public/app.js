@@ -656,31 +656,46 @@ function ensureRoiState(accountId) {
   return state.roiByAccount[accountId];
 }
 
+let lastRouteKey = null;
 function renderView(html) {
   dom.view.innerHTML = html;
-  dom.view.focus();
+  // Focus for keyboard/skip-link users without letting the browser yank the
+  // page so the title hides behind the sticky rail. Scroll to top only when
+  // the route actually changed; in-screen state changes keep their position.
+  dom.view.focus({ preventScroll: true });
+  const key = location.hash || '#/';
+  if (key !== lastRouteKey) window.scrollTo(0, 0);
+  lastRouteKey = key;
 }
 
 function renderLoading(label) {
   renderView(`
     <div class="loading-block" role="status" aria-live="polite">
+      <div class="eyebrow">Incident Lens</div>
       <div class="skeleton skeleton-title"></div>
       <div class="skeleton skeleton-line"></div>
+      <div class="skeleton skeleton-card"></div>
       <div class="skeleton skeleton-card"></div>
       <p class="muted small">${escapeHtml(label || 'Loading…')}</p>
     </div>
   `);
 }
 
-function renderFailure(title, message, retryHash) {
+function renderFailure(title, message, retryHash, opts) {
+  const o = opts || {};
+  const action = o.reload
+    ? `<button class="btn btn-primary" type="button" onclick="location.reload()">Reload the page</button>`
+    : `<a class="btn btn-primary" href="${retryHash || '#/'}">Back to accounts</a>`;
   renderView(`
-    <div class="failure">
+    <div class="section-head">
+      <div class="eyebrow">Something did not load</div>
+      <h1>Stopped, not stuck</h1>
+    </div>
+    <div class="failure" role="alert">
       <h3>${escapeHtml(title)}</h3>
       <p class="small">${escapeHtml(message)}</p>
-      <p class="small muted">Falling back cleanly rather than showing a blank or hanging screen.</p>
-      <div class="row" style="margin-top:10px;">
-        <a class="btn btn-dark btn-sm" href="${retryHash || '#/'}">Back to accounts</a>
-      </div>
+      <p class="small muted">We stop here rather than show a blank screen or invent data.</p>
+      <div class="row" style="margin-top:14px;">${action}</div>
     </div>
   `);
 }
@@ -704,8 +719,34 @@ function confidenceChip(confidence) {
   return `<span class="chip ${confidence === 'high' ? 'chip-strong' : ''}">${escapeHtml(label)} confidence</span>`;
 }
 
+// Source link pill. Host is legible at a glance; the full URL stays in href/title.
+function sourceLink(url, label) {
+  let host = url, path = '';
+  try {
+    const u = new URL(url);
+    host = u.host.replace(/^www\./, '');
+    path = (u.pathname + u.search).replace(/\/$/, '');
+  } catch { /* leave as-is */ }
+  const text = label
+    ? `<span class="host">${escapeHtml(label)}</span>`
+    : `<span class="host">${escapeHtml(host)}</span>${path ? `<span class="path">${escapeHtml(path)}</span>` : ''}`;
+  return `<a class="srclink" href="${escapeHtml(url)}" title="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${text}<span class="ext" aria-hidden="true">↗</span></a>`;
+}
+
 function customerChip(alreadyCustomer) {
-  return alreadyCustomer ? `<span class="chip chip-customer">✓ Existing incident.io customer</span>` : '';
+  return alreadyCustomer ? `<span class="chip chip-customer">Existing incident.io customer</span>` : '';
+}
+
+// Plainspoken note about how the fixtures were chosen. Shown on the picker
+// (below the fixtures) and in prospect-share mode, next to the disclaimer.
+function aboutBuildNote() {
+  return `
+    <aside class="about-build" aria-labelledby="about-build-title">
+      <div class="eyebrow" id="about-build-title">About this build</div>
+      <p class="hand">Two of the three prospects we first picked, Linear and Render, turned out to already be incident.io customers. Public evidence said so - the same check this product runs on every account - so both were swapped for clean prospects.</p>
+      <p class="tiny muted">Audition build - not affiliated with incident.io. Fixtures are precomputed from public pages; nothing here is a live call.</p>
+    </aside>
+  `;
 }
 
 function evidenceCountSummary(bundle) {
@@ -722,7 +763,9 @@ function screenAccountPicker() {
     setActionBar('');
     renderFailure(
       'Fixtures failed to load',
-      `Could not load the cached prospect data (${escapeHtml(DataStore.error || 'unknown error')}). Reload the page - the demo has no other dependency to fail.`,
+      `Could not load the cached prospect data (${DataStore.error || 'unknown error'}). A reload is the only dependency this demo has.`,
+      '#/',
+      { reload: true },
     );
     return;
   }
@@ -751,33 +794,39 @@ function screenAccountPicker() {
           </div>
           ${customerChip(account.alreadyCustomer)}
         </div>
-        <div class="freshness"><span class="pulse" aria-hidden="true"></span> Brief evidence observed ${fmtDate(account.createdAt)}</div>
+        <div class="freshness">Evidence observed <span class="mono">${fmtDate(account.createdAt)}</span></div>
         <div class="preview">
           ${bundle.signals.slice(0, 3).map((s) => `<span class="chip">${escapeHtml(s.label)}</span>`).join('')}
         </div>
-        <p class="small muted" style="margin-top:10px;">${counts.total} evidence cards · ${counts.observed} observed / ${counts.inferred} inferred</p>
+        <div class="account-foot">
+          <span class="small muted">${counts.total} sources · ${counts.observed} observed${counts.inferred ? `, ${counts.inferred} inferred` : ''}</span>
+          <span class="open-cue" aria-hidden="true">Open →</span>
+        </div>
       </button>
     `;
   }).join('');
 
   renderView(`
     <div class="section-head">
-      <div class="eyebrow">Incident Lens</div>
-      <h1>Pick a preloaded prospect</h1>
-      <p class="lede">Three polished fixtures, ready in under a second. Every claim you'll see is either observed with a source, or clearly marked as a hypothesis.</p>
+      <div class="eyebrow">Prospects<span class="sep">·</span>${DataStore.accounts.length} preloaded</div>
+      <h1>Who are we walking into?</h1>
+      <p class="lede">Three prospects, researched from public pages and ready in under a second. Every claim is observed with a source or clearly marked as a hypothesis.</p>
     </div>
     <div class="stack">
       ${cards}
     </div>
+    ${aboutBuildNote()}
     <div class="section-head">
-      <div class="eyebrow">Optional</div>
-      <h2>Try a live domain</h2>
-      <p class="small muted">Live scraping isn't part of this audition build. Enter a domain to see how the app fails closed instead of inventing data.</p>
+      <div class="eyebrow">Optional<span class="sep">·</span>Fails closed</div>
+      <h3 class="h-quiet">Try a live domain</h3>
+      <p class="small muted">Live scraping isn't part of this audition build. Enter a domain to see how the app stops instead of inventing data.</p>
     </div>
-    <form id="domain-form" class="card row" role="search">
-      <input id="domain-input" name="domain" type="text" inputmode="url" autocomplete="off" placeholder="e.g. acme.com"
-        style="flex:1; min-width:0; font:inherit; font-size:16px; padding:10px 12px; border:1px solid var(--sand); border-radius:10px; background:var(--canvas);" />
-      <button class="btn btn-dark btn-sm" type="submit">Look up</button>
+    <form id="domain-form" class="card domain-form" role="search">
+      <label class="small" for="domain-input" style="font-weight:600;">Prospect domain</label>
+      <div class="row" style="flex-wrap:nowrap;">
+        <input id="domain-input" name="domain" type="text" inputmode="url" autocomplete="off" placeholder="e.g. acme.com" class="text-input" />
+        <button class="btn btn-dark" type="submit">Look up</button>
+      </div>
     </form>
   `);
   setActionBar('');
@@ -807,12 +856,13 @@ function screenAccountPicker() {
 
 function accountHeader(account, subtitle) {
   return `
-    <div class="section-head">
-      <div class="eyebrow">${escapeHtml(account.domain)}${account.industry ? ' · ' + escapeHtml(account.industry) : ''}</div>
+    <div class="section-head account-head">
+      <div class="eyebrow">Prospect${account.industry ? `<span class="sep">·</span>${escapeHtml(account.industry)}` : ''}</div>
       <div class="between">
         <h1>${escapeHtml(account.name)}</h1>
         ${customerChip(account.alreadyCustomer)}
       </div>
+      <div class="account-domain mono">${escapeHtml(account.domain)}</div>
       ${subtitle ? `<p class="lede">${subtitle}</p>` : ''}
     </div>
   `;
@@ -821,12 +871,11 @@ function accountHeader(account, subtitle) {
 function evidenceCardHtml(evidence) {
   return `
     <div class="ev ${evidence.kind}">
-      ${kindChip(evidence.kind)}
+      <div class="chiprow">${kindChip(evidence.kind)}${confidenceChip(evidence.confidence)}</div>
       <p class="claim">${escapeHtml(evidence.claim)}</p>
       <dl class="meta">
-        <dt>Source</dt><dd><a href="${escapeHtml(evidence.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(evidence.url)}</a></dd>
-        <dt>Observed</dt><dd>${fmtDate(evidence.observedAt)}</dd>
-        <dt>Confidence</dt><dd>${confidenceChip(evidence.confidence)}</dd>
+        <dt>Source</dt><dd>${sourceLink(evidence.url)}</dd>
+        <dt>Observed</dt><dd class="mono">${fmtDate(evidence.observedAt)}</dd>
       </dl>
     </div>
   `;
@@ -844,8 +893,11 @@ function screenEvidence(accountId) {
     : renderEmpty('No evidence yet', 'This account has no evidence cards loaded, so no brief can be generated - unsupported claims are blocked, not invented.');
 
   renderView(`
-    ${accountHeader(bundle.account, `Every claim below is public, dated and linked. ${counts.observed} observed, ${counts.inferred} inferred - nothing is presented as fact without a source.`)}
-    <div class="card">
+    ${accountHeader(bundle.account, `Every claim below is public, dated and linked. Nothing is presented as fact without a source.`)}
+    <div class="section-head">
+      <div class="eyebrow">Evidence<span class="sep">·</span>${counts.total} source${counts.total === 1 ? '' : 's'}<span class="sep">·</span>${counts.observed} observed, ${counts.inferred} inferred</div>
+    </div>
+    <div class="ev-list">
       ${list}
     </div>
   `);
@@ -860,12 +912,12 @@ function screenEvidence(accountId) {
 function hypothesisCard(h, evidences) {
   const supporting = h.evidenceIds.map((id) => byId(evidences, id)).filter(Boolean);
   return `
-    <div class="card">
+    <div class="card hyp">
       ${kindChip('inferred')}
-      <p class="claim" style="font-size:15.5px; margin:8px 0;">${escapeHtml(h.statement)}</p>
+      <p class="claim">${escapeHtml(h.statement)}</p>
       <p class="tiny muted" style="margin-bottom:6px;">Supporting evidence</p>
       <ul class="list-plain small">
-        ${supporting.map((e) => `<li>· ${escapeHtml(e.claim)} <a href="${escapeHtml(e.url)}" target="_blank" rel="noopener noreferrer" class="tiny">(source)</a></li>`).join('') || '<li class="muted">None linked</li>'}
+        ${supporting.map((e) => `<li class="hyp-ev"><span>${escapeHtml(e.claim)}</span>${sourceLink(e.url)}</li>`).join('') || '<li class="muted">None linked</li>'}
       </ul>
     </div>
   `;
@@ -874,20 +926,22 @@ function hypothesisCard(h, evidences) {
 function recommendationCard(rec, capabilities, integrations, evidences) {
   const capability = rec.capabilityId ? byId(capabilities, rec.capabilityId) : null;
   const integration = rec.integrationId ? byId(integrations, rec.integrationId) : null;
-  const title = capability ? `${capability.product} · ${capability.name}` : integration.name;
-  const desc = capability ? capability.description : `${integration.category} integration`;
+  const area = capability ? capability.product : `${integration.category} integration`;
+  const title = capability ? capability.name : integration.name;
+  const desc = capability ? capability.description : `Official incident.io integration (${integration.category}).`;
   const sourceUrl = capability ? capability.sourceUrl : integration.sourceUrl;
   const supporting = rec.evidenceIds.map((id) => byId(evidences, id)).filter(Boolean);
   return `
-    <div class="card">
-      <div class="between">
-        <h3 style="margin-bottom:2px;">${escapeHtml(title)}</h3>
-        <a class="tiny" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Official page</a>
-      </div>
+    <div class="card rec">
+      <div class="rec-head"><span class="chip">${escapeHtml(area)}</span></div>
+      <h3>${escapeHtml(title)}</h3>
       <p class="small muted">${escapeHtml(desc)}</p>
-      <p class="small" style="margin-top:8px;"><strong>Why this?</strong> ${escapeHtml(rec.reasons[0])}</p>
-      ${supporting.length ? `<p class="tiny muted" style="margin-top:6px;">Evidence: ${supporting.map((e) => `<a href="${escapeHtml(e.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(e.claim.slice(0, 42))}${e.claim.length > 42 ? '…' : ''}</a>`).join(', ')}</p>` : ''}
-      <p class="tiny muted" style="margin-top:6px;">Rule: <span class="mono">${escapeHtml(rec.ruleId)}</span></p>
+      <p class="rec-why"><strong>Why this?</strong> ${escapeHtml(rec.reasons[0])}</p>
+      <div class="rec-foot">
+        ${sourceLink(sourceUrl, 'Official incident.io page')}
+        ${supporting.map((e) => sourceLink(e.url, `Evidence: ${e.claim.slice(0, 36)}${e.claim.length > 36 ? '…' : ''}`)).join('')}
+      </div>
+      <p class="tiny muted" style="margin-top:10px;">Rule <span class="mono">${escapeHtml(rec.ruleId)}</span></p>
     </div>
   `;
 }
@@ -903,15 +957,21 @@ function screenBrief(accountId) {
 
   if (!built) {
     renderView(`
-      ${accountHeader(account, 'Signals are normalized from the evidence ledger. Tap below to generate the reliability story: exactly three evidence-backed hypotheses plus a deterministic product/integration map.')}
+      ${accountHeader(account, 'Signals are normalized from the evidence ledger. Tap below to turn them into three evidence-backed hypotheses and a deterministic product map.')}
+      <div class="section-head"><div class="eyebrow">Signals<span class="sep">·</span>${signals.length} normalized from evidence</div></div>
       <div class="card">
-        <h4>Signals observed</h4>
         <div class="chiprow">
           ${signals.map((s) => `<span class="chip chip-strong">${escapeHtml(s.label)}</span>`).join('')}
         </div>
       </div>
-      <div class="card card-quiet" style="margin-top:14px; text-align:center;">
-        <p class="small muted">No brief generated yet for this account.</p>
+      <div class="empty" style="margin-top:14px;">
+        <h3>Nothing written yet - on purpose</h3>
+        <p class="small">Tap <strong>Build the reliability story</strong> and these ${signals.length} signals become three hypotheses, discovery questions and a product map. All from cached evidence; no network call, nothing invented.</p>
+        <div class="skeleton-preview" aria-hidden="true">
+          <div class="skeleton skeleton-line" style="width:56%"></div>
+          <div class="skeleton skeleton-line" style="width:84%"></div>
+          <div class="skeleton skeleton-line" style="width:70%"></div>
+        </div>
       </div>
     `);
     setActionBar(`
@@ -942,10 +1002,11 @@ function screenBrief(accountId) {
   const brief = BriefVersionStore.latestFor(accountId, 'internal');
 
   renderView(`
-    ${accountHeader(account, 'Fact separated from sales interpretation: hypotheses are always marked inferred, recommendations always show their rule and evidence.')}
+    ${accountHeader(account, 'Fact kept apart from interpretation: hypotheses are marked inferred, and every recommendation shows its rule and evidence.')}
 
     <div class="section-head">
-      <h2>Three evidence-backed hypotheses</h2>
+      <div class="eyebrow">Reliability story<span class="sep">·</span>${hypotheses.length} hypotheses</div>
+      <h2>Three things worth checking</h2>
       <p class="small muted">Never presented as fact - always "might" or "could", always linked to evidence.</p>
     </div>
     <div class="stack">
@@ -953,7 +1014,8 @@ function screenBrief(accountId) {
     </div>
 
     <div class="section-head">
-      <h2>Discovery questions</h2>
+      <div class="eyebrow">Discovery<span class="sep">·</span>${questions.length} questions</div>
+      <h2>Ask, don't assert</h2>
       <p class="small muted">Deterministically derived from the hypotheses above - drafting only, never a claim.</p>
     </div>
     <div class="card">
@@ -963,16 +1025,18 @@ function screenBrief(accountId) {
     </div>
 
     <div class="section-head">
-      <h2>Product capability matches</h2>
-      <p class="small muted">${capRecs.length} match${capRecs.length === 1 ? '' : 'es'} · matcher ${escapeHtml(Matcher.version)}, deterministic rules only.</p>
+      <div class="eyebrow">Product map<span class="sep">·</span>${capRecs.length} capability match${capRecs.length === 1 ? '' : 'es'}</div>
+      <h2>Where incident.io fits</h2>
+      <p class="small muted">Matcher <span class="mono">${escapeHtml(Matcher.version)}</span>, deterministic rules only - every match shows its rule and evidence.</p>
     </div>
     <div class="stack">
       ${capRecs.length ? capRecs.map((r) => recommendationCard(r, DataStore.capabilities, DataStore.integrations, evidences)).join('') : renderEmpty('No capability matches', 'No signal matched a capability rule for this account.')}
     </div>
 
     <div class="section-head">
-      <h2>Integration matches</h2>
-      <p class="small muted">${intRecs.length} match${intRecs.length === 1 ? '' : 'es'} · only recommended when the integration's name appears in the account's own public evidence.</p>
+      <div class="eyebrow">Integrations<span class="sep">·</span>${intRecs.length} named in evidence</div>
+      <h2>Plugs into what they run</h2>
+      <p class="small muted">Only recommended when the integration's name appears in the account's own public evidence.</p>
     </div>
     <div class="stack">
       ${intRecs.length ? intRecs.map((r) => recommendationCard(r, DataStore.capabilities, DataStore.integrations, evidences)).join('') : renderEmpty('No integration matches', 'No public evidence explicitly named one of the official integrations for this account.')}
@@ -981,24 +1045,28 @@ function screenBrief(accountId) {
     ${brief ? `<p class="tiny muted" style="margin-top:18px;">Brief v${brief.version} · generated ${fmtDate(brief.createdAt)} · matcher ${escapeHtml(brief.matcherVersion)}</p>` : ''}
 
     <div class="card card-quiet" style="margin-top:16px;">
-      <h4>Useful?</h4>
+      <h4>Was this brief useful?</h4>
+      <p class="small muted" style="margin-top:-2px;">Recorded against brief v${brief ? brief.version : 1} so the matcher can be tuned.</p>
       <div class="row">
-        <button class="btn btn-sm" type="button" data-feedback="useful">👍 Useful</button>
-        <button class="btn btn-sm" type="button" data-feedback="not-useful">👎 Not useful</button>
+        <button class="btn" type="button" data-feedback="useful" aria-pressed="false">Useful</button>
+        <button class="btn" type="button" data-feedback="not-useful" aria-pressed="false">Not useful</button>
       </div>
-      <p class="tiny muted" id="feedback-ack" style="margin-top:8px;"></p>
+      <p class="tiny muted" id="feedback-ack" style="margin-top:8px;" role="status"></p>
     </div>
 
-    <div class="section-head"><h2>Internal: Salesforce-ready payload</h2><p class="small muted">Typed preview only - the integration boundary, no real CRM call.</p></div>
+    <div class="section-head"><div class="eyebrow">Internal<span class="sep">·</span>Sales only</div><h3 class="h-quiet">Salesforce-ready payload</h3><p class="small muted">Typed preview only - the integration boundary, no real CRM call.</p></div>
     <div class="callout callout-internal">
-      Internal notes: sales-only, removed automatically in share mode.
+      <strong>Internal</strong> · sales-only section, removed automatically in share mode.
     </div>
-    <pre class="pre" id="sf-payload" style="margin-top:10px;">${escapeHtml(JSON.stringify(buildSalesforcePayload(bundle, recs, Roi.calculate(Roi.assumptionsAsMap(ensureRoiState(accountId).assumptions)), brief), null, 2))}</pre>
+    <details class="disclosure" style="margin-top:10px;">
+      <summary>Show the typed Opportunity payload</summary>
+      <pre class="pre" id="sf-payload">${escapeHtml(JSON.stringify(buildSalesforcePayload(bundle, recs, Roi.calculate(Roi.assumptionsAsMap(ensureRoiState(accountId).assumptions)), brief), null, 2))}</pre>
+    </details>
     <div class="row" style="margin-top:10px;">
-      <button class="btn btn-sm" type="button" id="copy-sf-payload">Copy JSON</button>
+      <button class="btn" type="button" id="copy-sf-payload">Copy JSON</button>
     </div>
 
-    <div class="section-head"><h2>Event trail</h2></div>
+    <div class="section-head"><div class="eyebrow">Internal<span class="sep">·</span>This session</div><h3 class="h-quiet">Event trail</h3></div>
     <ul class="trail">
       ${EventTrail.forAccount(accountId).slice(-6).reverse().map((e) => `<li><time>${fmtDate(e.at)}</time><span>${escapeHtml(e.type)}</span></li>`).join('') || '<li class="muted">No events recorded yet this session.</li>'}
     </ul>
@@ -1016,6 +1084,7 @@ function screenBrief(accountId) {
       const fb = Models.feedbackEvent({ briefId: brief ? brief.id : uid('brief'), useful });
       FeedbackStore.add(fb);
       EventTrail.record('feedback', { accountId, useful });
+      dom.view.querySelectorAll('[data-feedback]').forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
       document.getElementById('feedback-ack').textContent = useful
         ? 'Thanks - recorded as useful.'
         : 'Thanks - recorded as not useful.';
@@ -1052,18 +1121,25 @@ const PHASE_LABEL = {
 
 const scenarioActiveStep = {}; // accountId -> order (1-based)
 
-function scenarioStepHtml(step, signals, isActive, isDone) {
+function scenarioStepHtml(step, signals, isActive, isDone, showState) {
   const personalized = step.personalizedFrom.map((id) => byId(signals, id)).filter(Boolean);
   const stateClass = isActive ? 'is-active' : isDone ? 'is-done' : '';
+  const stateChip = showState === false ? ''
+    : isActive ? '<span class="chip chip-live">Live now</span>'
+    : isDone ? '<span class="chip chip-observed">Done</span>'
+    : '<span class="chip chip-unknown">Up next</span>';
   return `
-    <li class="${stateClass}">
-      <span class="node">${step.order}</span>
+    <li class="${stateClass}" ${isActive ? 'aria-current="step"' : ''}>
+      <span class="node" aria-hidden="true">${isDone ? '✓' : step.order}</span>
       <div class="step-card">
-        <div class="step-phase">${escapeHtml(PHASE_LABEL[step.phase] || step.phase)}</div>
+        <div class="step-head">
+          <span class="step-phase">${escapeHtml(PHASE_LABEL[step.phase] || step.phase)}</span>
+          ${stateChip}
+        </div>
         <p>${escapeHtml(step.text)}</p>
         ${personalized.length
-          ? `<div class="chiprow">${personalized.map((s) => `<span class="chip chip-strong">${escapeHtml(s.label)}</span>`).join('')}</div>`
-          : `<span class="chip chip-unknown">Illustrative step - not tied to observed evidence</span>`}
+          ? `<div class="step-src"><span class="tiny muted">From observed signals</span><div class="chiprow">${personalized.map((s) => `<span class="chip chip-strong">${escapeHtml(s.label)}</span>`).join('')}</div></div>`
+          : `<span class="chip chip-unknown"><span class="g">?</span> Illustrative - not tied to observed evidence</span>`}
       </div>
     </li>
   `;
@@ -1090,6 +1166,7 @@ function screenScenario(accountId) {
 
   renderView(`
     ${accountHeader(account, 'A compact incident walkthrough personalized to their observed or hypothesized stack. Steps not tied to public evidence are clearly marked illustrative, never presented as fact.')}
+    <div class="section-head"><div class="eyebrow">Scenario<span class="sep">·</span>Step ${active} of ${scenarioSteps.length}<span class="sep">·</span>${escapeHtml(PHASE_LABEL[scenarioSteps[active - 1].phase] || scenarioSteps[active - 1].phase)}</div></div>
     <ol class="rail">
       ${scenarioSteps.map((s) => scenarioStepHtml(s, signals, s.order === active, s.order < active)).join('')}
     </ol>
@@ -1097,18 +1174,25 @@ function screenScenario(accountId) {
 
   setActionBar(`
     <div class="wrap">
-      <button class="btn btn-sm" type="button" id="scn-prev" ${active <= 1 ? 'disabled' : ''}>← Prev</button>
-      <span class="hint" style="flex:1; text-align:center;">Step ${active} of ${scenarioSteps.length} · ${escapeHtml(PHASE_LABEL[scenarioSteps[active - 1].phase])}</span>
+      <button class="btn" type="button" id="scn-prev" ${active <= 1 ? 'disabled' : ''} aria-label="Previous step">← Prev</button>
+      <span class="hint" style="flex:1; text-align:center;">Step ${active} of ${scenarioSteps.length}<br><strong>${escapeHtml(PHASE_LABEL[scenarioSteps[active - 1].phase])}</strong></span>
       ${active < scenarioSteps.length
-        ? `<button class="btn btn-primary btn-sm" type="button" id="scn-next">Next →</button>`
-        : `<a class="btn btn-primary btn-sm" href="#/a/${accountId}/roi">To ROI →</a>`}
+        ? `<button class="btn btn-primary" type="button" id="scn-next">Next →</button>`
+        : `<a class="btn btn-primary" href="#/a/${accountId}/roi">To ROI →</a>`}
     </div>
   `);
 
+  // Animate the state change only: bring the newly active step into view.
+  const step = (delta) => {
+    scenarioActiveStep[accountId] = clamp(active + delta, 1, scenarioSteps.length);
+    render();
+    const li = dom.view.querySelector('.rail li.is-active');
+    if (li) li.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  };
   const prevBtn = document.getElementById('scn-prev');
   const nextBtn = document.getElementById('scn-next');
-  if (prevBtn) prevBtn.addEventListener('click', () => { scenarioActiveStep[accountId] = clamp(active - 1, 1, scenarioSteps.length); render(); });
-  if (nextBtn) nextBtn.addEventListener('click', () => { scenarioActiveStep[accountId] = clamp(active + 1, 1, scenarioSteps.length); render(); });
+  if (prevBtn) prevBtn.addEventListener('click', () => step(-1));
+  if (nextBtn) nextBtn.addEventListener('click', () => step(1));
 }
 
 /* =========================================================================
@@ -1123,9 +1207,18 @@ const LEVER_META = {
 
 function leverResultHtml(result) {
   return `
-    <div class="num">${fmtMoney(result.monthly)}<span style="font-size:14px; font-weight:600;">/mo</span></div>
+    <div class="num">${fmtMoney(result.monthly)}<span>/mo</span></div>
     <div class="small muted">${fmtMoney(result.annual)}/yr</div>
     <div class="formula">${escapeHtml(result.formula)}</div>
+  `;
+}
+
+// The one deep-burgundy pause in the flow: the conclusion, in white serif, with its formula beside it.
+function totalResultHtml(total) {
+  return `
+    <div class="pause-num serif">${fmtMoney(total.monthly)}<span class="per">/mo</span></div>
+    <div class="pause-yr">${fmtMoney(total.annual)} a year, illustrative</div>
+    <div class="formula">downtime + engineer time + tool consolidation, added monthly</div>
   `;
 }
 
@@ -1164,22 +1257,19 @@ function screenRoi(accountId) {
   renderView(`
     ${accountHeader(bundle.account, 'Three editable levers. Every formula stays visible next to its result and nothing here is a guarantee - these are assumptions you and the prospect can change together.')}
 
+    <div class="section-head"><div class="eyebrow">Business case<span class="sep">·</span>3 editable levers</div></div>
     ${leverHtml('downtime', roiState.assumptions, results.downtime)}
     ${leverHtml('engineer-time', roiState.assumptions, results.engineerTime)}
     ${leverHtml('consolidation', roiState.assumptions, results.consolidation)}
 
-    <div class="lever total" style="margin-top:16px; background:var(--charcoal); color:#fff; border-color:var(--charcoal);">
-      <h3 style="color:#fff;">Combined illustrative business case</h3>
-      <div class="result" id="result-total" style="background:rgba(255,255,255,0.08);">
-        <div class="num">${fmtMoney(results.total.monthly)}<span style="font-size:14px; font-weight:600;">/mo</span></div>
-        <div class="small" style="color:#d8d2c8;">${fmtMoney(results.total.annual)}/yr</div>
-        <div class="formula" style="color:#d8d2c8;">downtime + engineer time + tool consolidation, added monthly</div>
-      </div>
-      <p class="tiny" style="color:#d8d2c8; margin-top:10px;">Not a guarantee. Illustrative only, built from the editable assumptions above - always disclosed alongside the number.</p>
-    </div>
+    <section class="pause" aria-labelledby="roi-total-title">
+      <div class="eyebrow" id="roi-total-title">Illustrative total<span class="sep">·</span>Not a guarantee</div>
+      <div id="result-total">${totalResultHtml(results.total)}</div>
+      <p class="pause-note">Built from the editable assumptions above and always disclosed alongside the number. Change any input and this changes with it.</p>
+    </section>
 
     <div class="row" style="margin-top:14px;">
-      <button class="btn btn-sm" type="button" id="roi-reset">Reset to fixture baseline</button>
+      <button class="btn" type="button" id="roi-reset">Reset to fixture baseline</button>
     </div>
   `);
 
@@ -1198,11 +1288,7 @@ function screenRoi(accountId) {
     document.getElementById('result-downtime').innerHTML = leverResultHtml(res.downtime);
     document.getElementById('result-engineer-time').innerHTML = leverResultHtml(res.engineerTime);
     document.getElementById('result-consolidation').innerHTML = leverResultHtml(res.consolidation);
-    document.getElementById('result-total').innerHTML = `
-      <div class="num">${fmtMoney(res.total.monthly)}<span style="font-size:14px; font-weight:600;">/mo</span></div>
-      <div class="small" style="color:#d8d2c8;">${fmtMoney(res.total.annual)}/yr</div>
-      <div class="formula" style="color:#d8d2c8;">downtime + engineer time + tool consolidation, added monthly</div>
-    `;
+    document.getElementById('result-total').innerHTML = totalResultHtml(res.total);
   }
 
   dom.view.querySelectorAll('[data-roi-key]').forEach((input) => {
@@ -1286,43 +1372,44 @@ function screenShare(accountId) {
   renderView(`
     ${accountHeader(account, 'A prospect-safe summary: sources and uncertainty stay visible, internal notes and sales-only language are removed.')}
 
-    <div class="section-head"><h2>What we found publicly</h2></div>
-    <div class="card">
+    <div class="section-head"><div class="eyebrow">Evidence<span class="sep">·</span>${evidences.length} public source${evidences.length === 1 ? '' : 's'}</div><h2>What we found publicly</h2><p class="small muted">Each claim carries its source and the date we saw it.</p></div>
+    <div class="ev-list">
       ${evidences.map(evidenceCardHtml).join('')}
     </div>
 
-    <div class="section-head"><h2>Hypotheses worth discussing</h2><p class="small muted">Marked as hypotheses, not facts.</p></div>
+    <div class="section-head"><div class="eyebrow">Reliability story<span class="sep">·</span>${hypotheses.length} hypotheses</div><h2>Worth discussing</h2><p class="small muted">Marked as hypotheses, not facts.</p></div>
     <div class="stack">${hypotheses.map((h) => hypothesisCard(h, evidences)).join('')}</div>
 
-    <div class="section-head"><h2>Where incident.io could help</h2></div>
+    <div class="section-head"><div class="eyebrow">Product map<span class="sep">·</span>${capRecs.length + intRecs.length} match${capRecs.length + intRecs.length === 1 ? '' : 'es'}</div><h2>Where incident.io could help</h2><p class="small muted">Each match links the official product page and the public evidence behind it.</p></div>
     <div class="stack">
       ${[...capRecs, ...intRecs].map((r) => recommendationCardShare(r, DataStore.capabilities, DataStore.integrations, evidences)).join('') || renderEmpty('No matches yet', 'No deterministic match found for this account.')}
     </div>
 
-    <div class="section-head"><h2>Personalized incident walkthrough</h2></div>
+    <div class="section-head"><div class="eyebrow">Scenario<span class="sep">·</span>${scenarioSteps.length} steps</div><h2>An incident, as it would run</h2><p class="small muted">Steps not tied to public evidence are marked illustrative.</p></div>
     <ol class="rail">
-      ${scenarioSteps.map((s) => scenarioStepHtml(s, signals, false, false)).join('')}
+      ${scenarioSteps.map((s) => scenarioStepHtml(s, signals, false, false, false)).join('')}
     </ol>
 
-    <div class="section-head"><h2>Illustrative business case</h2><p class="small muted">Editable - change any assumption to match reality.</p></div>
+    <div class="section-head"><div class="eyebrow">Business case<span class="sep">·</span>3 editable levers</div><h2>Illustrative business case</h2><p class="small muted">Editable - change any assumption to match reality.</p></div>
     ${leverHtml('downtime', roiState.assumptions, results.downtime)}
     ${leverHtml('engineer-time', roiState.assumptions, results.engineerTime)}
     ${leverHtml('consolidation', roiState.assumptions, results.consolidation)}
-    <div class="lever total" style="margin-top:12px; background:var(--burgundy); color:#fff; border-color:var(--burgundy);">
-      <h3 style="color:#fff;">Combined illustrative total</h3>
-      <div class="result" id="result-total" style="background:rgba(255,255,255,0.1);">${leverResultHtml(results.total)}</div>
-      <p class="tiny" style="color:#e0c6c1; margin-top:8px;">Not a guarantee - an editable starting point for a real conversation.</p>
-    </div>
+    <section class="pause" aria-labelledby="roi-total-title">
+      <div class="eyebrow" id="roi-total-title">Illustrative total<span class="sep">·</span>Not a guarantee</div>
+      <div id="result-total">${totalResultHtml(results.total)}</div>
+      <p class="pause-note">An editable starting point for a real conversation, not a promise. Change any assumption above and this changes with it.</p>
+    </section>
 
     <div class="card card-quiet" style="margin-top:16px;">
       <h4>Share this view</h4>
       <p class="small muted">Stable link - reopens this exact prospect-safe summary.</p>
-      <div class="row">
-        <input id="share-url" type="text" readonly value="${escapeHtml(location.href)}" style="flex:1; min-width:0; font:inherit; font-size:13px; padding:9px 10px; border:1px solid var(--sand); border-radius:8px; background:var(--white);" />
-        <button class="btn btn-dark btn-sm" type="button" id="copy-share-url">Copy link</button>
+      <div class="row" style="flex-wrap:nowrap;">
+        <input id="share-url" type="text" readonly value="${escapeHtml(location.href)}" class="text-input" style="font-size:13px; background:var(--white);" aria-label="Share link" />
+        <button class="btn btn-primary" type="button" id="copy-share-url">Copy link</button>
       </div>
     </div>
 
+    ${aboutBuildNote()}
     <p class="tiny muted" style="margin-top:14px;">Brief v${brief.version} (share) · generated ${fmtDate(brief.createdAt)} · Incident Lens is an audition build, not affiliated with incident.io.</p>
   `);
 
@@ -1342,7 +1429,7 @@ function screenShare(accountId) {
       const vals = Roi.assumptionsAsMap(roiState.assumptions);
       const res = Roi.calculate(vals);
       document.getElementById(`result-${assumption.lever}`).innerHTML = leverResultHtml(res[assumption.lever === 'engineer-time' ? 'engineerTime' : assumption.lever]);
-      document.getElementById('result-total').innerHTML = leverResultHtml(res.total);
+      document.getElementById('result-total').innerHTML = totalResultHtml(res.total);
     });
   });
 
@@ -1362,19 +1449,21 @@ function screenShare(accountId) {
 function recommendationCardShare(rec, capabilities, integrations, evidences) {
   const capability = rec.capabilityId ? byId(capabilities, rec.capabilityId) : null;
   const integration = rec.integrationId ? byId(integrations, rec.integrationId) : null;
-  const title = capability ? `${capability.product} · ${capability.name}` : integration.name;
-  const desc = capability ? capability.description : `${integration.category} integration`;
+  const area = capability ? capability.product : `${integration.category} integration`;
+  const title = capability ? capability.name : integration.name;
+  const desc = capability ? capability.description : `Official incident.io integration (${integration.category}).`;
   const sourceUrl = capability ? capability.sourceUrl : integration.sourceUrl;
   const supporting = rec.evidenceIds.map((id) => byId(evidences, id)).filter(Boolean);
   return `
-    <div class="card">
-      <div class="between">
-        <h3 style="margin-bottom:2px;">${escapeHtml(title)}</h3>
-        <a class="tiny" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Official page</a>
-      </div>
+    <div class="card rec">
+      <div class="rec-head"><span class="chip">${escapeHtml(area)}</span></div>
+      <h3>${escapeHtml(title)}</h3>
       <p class="small muted">${escapeHtml(desc)}</p>
-      <p class="small" style="margin-top:8px;">${escapeHtml(rec.reasons[0])}</p>
-      ${supporting.length ? `<p class="tiny muted" style="margin-top:6px;">Evidence: ${supporting.map((e) => `<a href="${escapeHtml(e.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(e.claim.slice(0, 42))}${e.claim.length > 42 ? '…' : ''}</a>`).join(', ')}</p>` : ''}
+      <p class="rec-why">${escapeHtml(rec.reasons[0])}</p>
+      <div class="rec-foot">
+        ${sourceLink(sourceUrl, 'Official incident.io page')}
+        ${supporting.map((e) => sourceLink(e.url, `Evidence: ${e.claim.slice(0, 36)}${e.claim.length > 36 ? '…' : ''}`)).join('')}
+      </div>
     </div>
   `;
 }
@@ -1404,7 +1493,7 @@ function render() {
     dom.steprail.hidden = true;
     dom.modeSwitch.hidden = true;
     setActionBar('');
-    renderLoading('Loading cached fixtures…');
+    renderLoading('Loading three cached prospects. No network after this.');
     return;
   }
   if (state.status === 'error') {
