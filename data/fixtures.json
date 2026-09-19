@@ -2,55 +2,55 @@
   "fixtures": [
     {
       "account": {
-        "id": "id_f3167e52",
-        "domain": "linear.app",
-        "name": "Linear",
-        "industry": "Software",
+        "id": "id_starling1",
+        "domain": "starlingbank.com",
+        "name": "Starling Bank",
+        "industry": "Banking",
         "createdAt": "2026-09-18T00:00:00Z",
-        "alreadyCustomer": true
+        "alreadyCustomer": false
       },
       "evidences": [
         {
-          "id": "id_c39b1db0",
-          "accountId": "id_f3167e52",
-          "claim": "Status page is explicitly powered by incident.io.",
-          "url": "https://linearstatus.com/",
+          "id": "id_399ce1cc",
+          "accountId": "id_starling1",
+          "claim": "Status page is explicitly powered by Atlassian Statuspage.",
+          "url": "https://starlingbank.statuspage.io/",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
         },
         {
-          "id": "id_a2202b77",
-          "accountId": "id_f3167e52",
-          "claim": "Published a detailed incident postmortem regarding a temporary data loss event caused by a database migration.",
-          "url": "https://linear.app/now/linear-incident-on-jan-24th-2024",
+          "id": "id_fbf1b77c",
+          "accountId": "id_starling1",
+          "claim": "Engine by Starling hires Platform Engineers with strong SRE mindset for cloud-native banking platform across GCP and AWS.",
+          "url": "https://builtinmanchester.uk/job/platform-engineer-engine-starling/7354986",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
         },
         {
-          "id": "id_f676526b",
-          "accountId": "id_f3167e52",
-          "claim": "Shared a public postmortem on a March 2026 security incident involving sync group access control bugs.",
-          "url": "https://linear.app/now/linear-incident-on-mar-24th-2026",
+          "id": "id_bcad5e90",
+          "accountId": "id_starling1",
+          "claim": "Starling Bank engineers built their own simple chaos daemon using AWS APIs to test resilience by terminating servers.",
+          "url": "https://www.infoq.com/articles/chaos-testing-starling-bank/",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
         },
         {
-          "id": "id_83574a70",
-          "accountId": "id_f3167e52",
-          "claim": "Engineering blog discusses their architecture using Google Cloud Platform (GCP) and Cloud SQL for PostgreSQL.",
-          "url": "https://cloud.google.com/blog/products/databases/product-workflow-tool-linear-uses-google-cloud-databases",
+          "id": "id_f0e9cea9",
+          "accountId": "id_starling1",
+          "claim": "Starling Bank uses IBM Instana for tracing requests across its systems to rapidly detect and resolve issues.",
+          "url": "https://techstories.ai/ibm-instana-observability-case-study-starling-bank/",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
         },
         {
-          "id": "id_e10b76df",
-          "accountId": "id_f3167e52",
-          "claim": "Engineering roles hire for Fullstack Typescript, Node, and GraphQL experience, indicating a small team of generalist engineers rather than dedicated SREs.",
-          "url": "https://linear.app/careers/cd5ae036-0223-427a-b038-ba16ef9dcb32",
+          "id": "id_39502b06",
+          "accountId": "id_starling1",
+          "claim": "Engineers discuss their launch architecture emphasizing a simple single-service-per-EC2-instance model for strong isolation.",
+          "url": "https://www.infoq.com/articles/resilient-banking-systems/",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -58,119 +58,134 @@
       ],
       "signals": [
         {
-          "id": "id_38192361",
-          "accountId": "id_f3167e52",
-          "label": "incident.io Status Page",
+          "id": "id_fe6307ad",
+          "accountId": "id_starling1",
+          "label": "Atlassian Statuspage",
           "evidenceIds": [
-            "id_c39b1db0"
+            "id_399ce1cc"
           ],
           "strength": 5
         },
         {
-          "id": "id_069a91f9",
-          "accountId": "id_f3167e52",
-          "label": "GCP & PostgreSQL Stack",
+          "id": "id_b47d98bb",
+          "accountId": "id_starling1",
+          "label": "GCP & AWS Multi-Cloud",
           "evidenceIds": [
-            "id_83574a70"
+            "id_fbf1b77c"
           ],
           "strength": 5
         },
         {
-          "id": "id_2930c28b",
-          "accountId": "id_f3167e52",
-          "label": "Generalist Fullstack Engineering",
+          "id": "id_2a65e69f",
+          "accountId": "id_starling1",
+          "label": "Chaos Engineering Culture",
           "evidenceIds": [
-            "id_e10b76df"
+            "id_bcad5e90"
           ],
           "strength": 4
         },
         {
-          "id": "id_6fac91b3",
-          "accountId": "id_f3167e52",
-          "label": "Transparent Incident Culture",
+          "id": "id_2a9e2046",
+          "accountId": "id_starling1",
+          "label": "IBM Instana Observability",
           "evidenceIds": [
-            "id_a2202b77",
-            "id_f676526b"
+            "id_f0e9cea9"
           ],
-          "strength": 5
+          "strength": 4
+        },
+        {
+          "id": "id_5bbcef66",
+          "accountId": "id_starling1",
+          "label": "EC2 Single-Service Architecture",
+          "evidenceIds": [
+            "id_39502b06"
+          ],
+          "strength": 3
         }
       ],
       "hypotheses": [
         {
-          "id": "id_96545aa2",
-          "accountId": "id_f3167e52",
-          "statement": "Given their generalist fullstack team, they might experience high context-switching costs during on-call escalations.",
+          "id": "id_78306f11",
+          "accountId": "id_starling1",
+          "statement": "Given their usage of Atlassian Statuspage, they might face limitations in API orchestration compared to a fully integrated incident management platform.",
           "evidenceIds": [
-            "id_e10b76df"
+            "id_399ce1cc"
           ],
-          "status": "hypothesis"
+          "status": "hypothesis",
+          "confidence": "medium",
+          "kind": "inferred"
         },
         {
-          "id": "id_96b6010b",
-          "accountId": "id_f3167e52",
-          "statement": "Since they actively write public postmortems, they might value automated timeline generation and export tools to save engineering time.",
+          "id": "id_cc25e969",
+          "accountId": "id_starling1",
+          "statement": "With their strong chaos engineering culture and custom AWS tooling, they might be open to more structured response workflows to handle unexpected failures.",
           "evidenceIds": [
-            "id_a2202b77",
-            "id_f676526b"
+            "id_bcad5e90"
           ],
-          "status": "hypothesis"
+          "status": "hypothesis",
+          "confidence": "medium",
+          "kind": "inferred"
         },
         {
-          "id": "id_edfa11a4",
-          "accountId": "id_f3167e52",
-          "statement": "As an existing incident.io Status Page customer, they might be open to consolidating their on-call and response tools into a single platform.",
+          "id": "id_3ca7f75d",
+          "accountId": "id_starling1",
+          "statement": "As they trace requests across multiple clouds with IBM Instana, their SRE team could benefit from automated timeline generation linking traces to incident response.",
           "evidenceIds": [
-            "id_c39b1db0"
+            "id_fbf1b77c",
+            "id_f0e9cea9"
           ],
-          "status": "hypothesis"
+          "status": "hypothesis",
+          "confidence": "medium",
+          "kind": "inferred"
         }
       ],
       "scenarioSteps": [
         {
           "order": 1,
           "phase": "alert",
-          "text": "A high-latency alert triggers from Google Cloud SQL for PostgreSQL.",
+          "text": "A synthetic chaos engineering test causes unexpected high latency in the AWS EC2 environment.",
           "personalizedFrom": [
-            "id_069a91f9"
+            "id_2a65e69f",
+            "id_5bbcef66"
           ]
         },
         {
           "order": 2,
           "phase": "routing",
-          "text": "The alert is routed to the on-call Fullstack Engineer.",
-          "personalizedFrom": [
-            "id_2930c28b"
-          ]
+          "text": "The alert pages the on-call Platform Engineer.",
+          "personalizedFrom": []
         },
         {
           "order": 3,
           "phase": "investigation",
-          "text": "The engineer queries the database cache and investigates the Node.js/GraphQL layer.",
+          "text": "The engineer uses IBM Instana to trace the slow requests and pinpoint the degraded microservice.",
           "personalizedFrom": [
-            "id_2930c28b",
-            "id_069a91f9"
+            "id_2a9e2046"
           ]
         },
         {
           "order": 4,
           "phase": "response",
-          "text": "The team opens an incident channel and collaborates on a fix.",
-          "personalizedFrom": []
+          "text": "The team scales up the isolated EC2 instances across the multi-cloud infrastructure to mitigate the latency.",
+          "personalizedFrom": [
+            "id_b47d98bb",
+            "id_5bbcef66"
+          ]
         },
         {
           "order": 5,
           "phase": "customer-update",
-          "text": "An update is posted directly to their incident.io powered status page.",
+          "text": "They post an update to their Atlassian Statuspage to inform users of temporary app slowness.",
           "personalizedFrom": [
-            "id_38192361"
+            "id_fe6307ad"
           ]
         },
         {
           "order": 6,
           "phase": "postmortem",
-          "text": "The team exports the incident timeline to draft a comprehensive public postmortem for their engineering blog.",
+          "text": "The team reviews the chaos test parameters and updates their runbooks to handle similar single-service degradations more gracefully.",
           "personalizedFrom": [
-            "id_6fac91b3"
+            "id_2a65e69f"
           ]
         }
       ]
@@ -349,64 +364,55 @@
     },
     {
       "account": {
-        "id": "id_5fba6a50",
-        "domain": "render.com",
-        "name": "Render",
-        "industry": "Cloud Computing",
+        "id": "id_snyk1",
+        "domain": "snyk.io",
+        "name": "Snyk",
+        "industry": "Developer Security",
         "createdAt": "2026-09-18T00:00:00Z",
-        "alreadyCustomer": true
+        "alreadyCustomer": false
       },
       "evidences": [
         {
-          "id": "id_68070328",
-          "accountId": "id_5fba6a50",
-          "claim": "Status page is powered by Atlassian Statuspage.",
-          "url": "https://status.render.com/",
+          "id": "id_9d944178",
+          "accountId": "id_snyk1",
+          "claim": "Public status page is powered by Atlassian Statuspage.",
+          "url": "https://snyk.statuspage.io/",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
         },
         {
-          "id": "id_c8997a09",
-          "accountId": "id_5fba6a50",
-          "claim": "Render has been an incident.io customer for years, as confirmed by CEO Anurag Goel and a published case study.",
-          "url": "https://www.casestudies.com/company/incidentio/case-study/industry-interviews-uma-chingunde-vice-president-of-engineering-at-render",
+          "id": "id_f49597c7",
+          "accountId": "id_snyk1",
+          "claim": "Snyk adopted FireHydrant in June 2022 to standardize their incident response program without disrupting existing Slack workflows.",
+          "url": "https://firehydrant.com/customer-stories/incident-response-change-management-without-disruption/",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
         },
         {
-          "id": "id_fb2d04e2",
-          "accountId": "id_5fba6a50",
-          "claim": "Published a detailed postmortem regarding an extended service disruption in March 2024 caused by an unintended workload restart affecting PostgreSQL and Redis.",
-          "url": "https://render.com/blog/root-cause-analysis-extended-service-disruption-3-26-24",
+          "id": "id_2f2ebd90",
+          "accountId": "id_snyk1",
+          "claim": "Published a detailed public postmortem regarding their exposure to the Klue vendor breach and their swift incident response.",
+          "url": "https://snyk.io/blog/when-a-vendors-breach-becomes-yours-lessons-from-the-klue-incident/",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
         },
         {
-          "id": "id_17daf796",
-          "accountId": "id_5fba6a50",
-          "claim": "Engineering blog details a staging environment incident caused by long-running PostgreSQL queries blocking database migrations.",
-          "url": "https://render.com/blog/postgresql-simple-query-big-problem",
+          "id": "id_f4c95f72",
+          "accountId": "id_snyk1",
+          "claim": "Security engineers published a postmortem detailing modern software supply chain attacks (Shai-Hulud) and response strategies.",
+          "url": "https://snyk.io/blog/shai-hulud-post-mortem/",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
         },
         {
-          "id": "id_ce2c8c3b",
-          "accountId": "id_5fba6a50",
-          "claim": "Public job posting for a Software Engineer, Compute Infrastructure mentions operating large-scale Kubernetes clusters across multiple cloud providers and participating in an on-call rotation.",
-          "url": "https://jobs.ashbyhq.com/render/d52dc923-1641-4386-b8ba-5c15e1d7028d",
-          "observedAt": "2026-09-18",
-          "confidence": "high",
-          "kind": "observed"
-        },
-        {
-          "id": "id_29a286a3",
-          "accountId": "id_5fba6a50",
-          "claim": "Engineering blog discusses their architecture using Render Workflows, Cloudflare, Dash0, and GitHub Actions for automated deployments.",
-          "url": "https://render.com/blog/blue-green-deployments-on-render-with-canary-traffic-splitting",
+          "id": "id_5526fcc8",
+          "accountId": "id_snyk1",
+          "claim": "A detailed root cause analysis published on a Snyk CLI command injection vulnerability (CVE-2022-40764).",
+          "url": "https://safeguard.sh/resources/blog/snyk-cli-command-injection-cve-2022-40764-analysis",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -414,133 +420,127 @@
       ],
       "signals": [
         {
-          "id": "id_017e565d",
-          "accountId": "id_5fba6a50",
-          "label": "incident.io Customer",
-          "evidenceIds": [
-            "id_c8997a09"
-          ],
-          "strength": 5
-        },
-        {
-          "id": "id_b8980f8a",
-          "accountId": "id_5fba6a50",
+          "id": "id_0f99fa41",
+          "accountId": "id_snyk1",
           "label": "Atlassian Statuspage",
           "evidenceIds": [
-            "id_68070328"
+            "id_9d944178"
           ],
           "strength": 5
         },
         {
-          "id": "id_60cf615f",
-          "accountId": "id_5fba6a50",
-          "label": "Kubernetes & Multi-Cloud Infrastructure",
+          "id": "id_df2e88fc",
+          "accountId": "id_snyk1",
+          "label": "FireHydrant Customer",
           "evidenceIds": [
-            "id_ce2c8c3b"
+            "id_f49597c7"
           ],
           "strength": 5
         },
         {
-          "id": "id_eb7b5893",
-          "accountId": "id_5fba6a50",
-          "label": "Managed PostgreSQL & Redis",
+          "id": "id_f8d0702e",
+          "accountId": "id_snyk1",
+          "label": "Transparent Postmortems",
           "evidenceIds": [
-            "id_fb2d04e2",
-            "id_17daf796"
-          ],
-          "strength": 5
-        },
-        {
-          "id": "id_926bf4e3",
-          "accountId": "id_5fba6a50",
-          "label": "Complex CI/CD Workflows",
-          "evidenceIds": [
-            "id_29a286a3"
+            "id_2f2ebd90",
+            "id_f4c95f72"
           ],
           "strength": 4
+        },
+        {
+          "id": "id_f7026808",
+          "accountId": "id_snyk1",
+          "label": "Developer Security Focus",
+          "evidenceIds": [
+            "id_5526fcc8"
+          ],
+          "strength": 5
         }
       ],
       "hypotheses": [
         {
-          "id": "id_a923db43",
-          "accountId": "id_5fba6a50",
-          "statement": "Given they already use incident.io internally, could they benefit from adopting the incident.io Status Page to replace their Atlassian Statuspage and consolidate tools?",
+          "id": "id_06d4ce9f",
+          "accountId": "id_snyk1",
+          "statement": "Given their use of FireHydrant, they might be looking for ways to further integrate their incident response with their own developer security platform.",
           "evidenceIds": [
-            "id_68070328",
-            "id_c8997a09"
+            "id_f49597c7",
+            "id_f4c95f72"
           ],
-          "status": "hypothesis"
+          "status": "hypothesis",
+          "confidence": "medium",
+          "kind": "inferred"
         },
         {
-          "id": "id_c2a00125",
-          "accountId": "id_5fba6a50",
-          "statement": "Because they operate multi-cloud Kubernetes clusters at scale, how might advanced routing and on-call escalation policies help their SRE team manage complex cross-region incidents?",
+          "id": "id_281f55a5",
+          "accountId": "id_snyk1",
+          "statement": "Since they actively publish detailed postmortems on vendor breaches, they might value tools that automate the sharing of root cause analyses.",
           "evidenceIds": [
-            "id_ce2c8c3b"
+            "id_2f2ebd90",
+            "id_f4c95f72"
           ],
-          "status": "hypothesis"
+          "status": "hypothesis",
+          "confidence": "medium",
+          "kind": "inferred"
         },
         {
-          "id": "id_5f6bd4cc",
-          "accountId": "id_5fba6a50",
-          "statement": "With their focus on managed PostgreSQL and Redis, would deeper workflow integrations with Dash0 and Cloudflare improve their ability to diagnose and mitigate data layer bottlenecks?",
+          "id": "id_84e99b9b",
+          "accountId": "id_snyk1",
+          "statement": "Using Atlassian Statuspage alongside FireHydrant could present an opportunity to consolidate their status communication and incident response into one platform.",
           "evidenceIds": [
-            "id_fb2d04e2",
-            "id_17daf796",
-            "id_29a286a3"
+            "id_9d944178",
+            "id_f49597c7"
           ],
-          "status": "hypothesis"
+          "status": "hypothesis",
+          "confidence": "medium",
+          "kind": "inferred"
         }
       ],
       "scenarioSteps": [
         {
           "order": 1,
           "phase": "alert",
-          "text": "Dash0 detects elevated error rates and latency across the managed PostgreSQL clusters.",
+          "text": "A critical supply chain vulnerability alert triggers from their internal scanning tools.",
           "personalizedFrom": [
-            "id_eb7b5893",
-            "id_926bf4e3"
+            "id_f7026808"
           ]
         },
         {
           "order": 2,
           "phase": "routing",
-          "text": "The alert triggers an escalation in incident.io, paging the on-call Compute Infrastructure SRE.",
-          "personalizedFrom": [
-            "id_017e565d",
-            "id_60cf615f"
-          ]
+          "text": "The alert is routed to the on-call Security Engineer via Slack.",
+          "personalizedFrom": []
         },
         {
           "order": 3,
           "phase": "investigation",
-          "text": "The engineer investigates Kubernetes node metrics and active queries using pg_stat_activity.",
+          "text": "The engineer investigates the affected dependencies and assesses the potential impact on customer environments.",
           "personalizedFrom": [
-            "id_60cf615f",
-            "id_eb7b5893"
+            "id_f7026808"
           ]
         },
         {
           "order": 4,
           "phase": "response",
-          "text": "The team runs an automated runbook via Render Workflows to terminate blocking transactions and restore database performance.",
+          "text": "The team opens an incident in Slack using FireHydrant to coordinate the remediation.",
           "personalizedFrom": [
-            "id_926bf4e3"
+            "id_df2e88fc"
           ]
         },
         {
           "order": 5,
           "phase": "customer-update",
-          "text": "They post an update to their Atlassian Statuspage acknowledging degraded performance for services with attached disks.",
+          "text": "An update is posted to their Atlassian Statuspage informing customers of the ongoing investigation.",
           "personalizedFrom": [
-            "id_b8980f8a"
+            "id_0f99fa41"
           ]
         },
         {
           "order": 6,
           "phase": "postmortem",
-          "text": "A detailed postmortem is published on their engineering blog explaining the scale of the event and the rate limits encountered.",
-          "personalizedFrom": []
+          "text": "A transparent postmortem is published on their blog detailing the vulnerability and their response.",
+          "personalizedFrom": [
+            "id_f8d0702e"
+          ]
         }
       ]
     }
