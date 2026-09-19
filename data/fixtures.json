@@ -15,6 +15,8 @@
           "accountId": "id_starling1",
           "claim": "Status page is explicitly powered by Atlassian Statuspage.",
           "url": "https://starlingbank.statuspage.io/",
+          "sourceTitle": "starlingbank.statuspage.io",
+          "sourceType": "status-page",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -24,6 +26,8 @@
           "accountId": "id_starling1",
           "claim": "Engine by Starling hires Platform Engineers with strong SRE mindset for cloud-native banking platform across GCP and AWS.",
           "url": "https://builtinmanchester.uk/job/platform-engineer-engine-starling/7354986",
+          "sourceTitle": "Platform engineer engine starling — builtinmanchester.uk",
+          "sourceType": "careers",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -33,6 +37,8 @@
           "accountId": "id_starling1",
           "claim": "Starling Bank engineers built their own simple chaos daemon using AWS APIs to test resilience by terminating servers.",
           "url": "https://www.infoq.com/articles/chaos-testing-starling-bank/",
+          "sourceTitle": "Chaos testing starling bank — infoq.com",
+          "sourceType": "blog",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -42,6 +48,8 @@
           "accountId": "id_starling1",
           "claim": "Starling Bank uses IBM Instana for tracing requests across its systems to rapidly detect and resolve issues.",
           "url": "https://techstories.ai/ibm-instana-observability-case-study-starling-bank/",
+          "sourceTitle": "Ibm instana observability case study starling bank — techstories.ai",
+          "sourceType": "other",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -51,6 +59,8 @@
           "accountId": "id_starling1",
           "claim": "Engineers discuss their launch architecture emphasizing a simple single-service-per-EC2-instance model for strong isolation.",
           "url": "https://www.infoq.com/articles/resilient-banking-systems/",
+          "sourceTitle": "Resilient banking systems — infoq.com",
+          "sourceType": "blog",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -154,13 +164,19 @@
           "personalizedFrom": [
             "id_2a65e69f",
             "id_5bbcef66"
-          ]
+          ],
+          "actor": "system",
+          "system": "AWS EC2",
+          "origin": "evidence"
         },
         {
           "order": 2,
           "phase": "routing",
           "text": "The alert pages the on-call Platform Engineer.",
-          "personalizedFrom": []
+          "personalizedFrom": [],
+          "actor": "system",
+          "system": "On-call rotation",
+          "origin": "hypothesis"
         },
         {
           "order": 3,
@@ -168,7 +184,10 @@
           "text": "The engineer uses IBM Instana to trace the slow requests and pinpoint the degraded microservice.",
           "personalizedFrom": [
             "id_2a9e2046"
-          ]
+          ],
+          "actor": "prospect",
+          "system": "IBM Instana",
+          "origin": "evidence"
         },
         {
           "order": 4,
@@ -177,7 +196,10 @@
           "personalizedFrom": [
             "id_b47d98bb",
             "id_5bbcef66"
-          ]
+          ],
+          "actor": "prospect",
+          "system": "AWS EC2 multi-cloud infrastructure",
+          "origin": "evidence"
         },
         {
           "order": 5,
@@ -185,7 +207,10 @@
           "text": "They post an update to their Atlassian Statuspage to inform users of temporary app slowness.",
           "personalizedFrom": [
             "id_fe6307ad"
-          ]
+          ],
+          "actor": "prospect",
+          "system": "Atlassian Statuspage",
+          "origin": "evidence"
         },
         {
           "order": 6,
@@ -193,7 +218,10 @@
           "text": "The team reviews the chaos test parameters and updates their runbooks to handle similar single-service degradations more gracefully.",
           "personalizedFrom": [
             "id_2a65e69f"
-          ]
+          ],
+          "actor": "prospect",
+          "system": "Runbooks",
+          "origin": "evidence"
         }
       ]
     },
@@ -212,6 +240,8 @@
           "accountId": "id_ecf4da10",
           "claim": "Public status page is powered by Atlassian Statuspage.",
           "url": "https://monzo.statuspage.io/",
+          "sourceTitle": "monzo.statuspage.io",
+          "sourceType": "status-page",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -221,6 +251,8 @@
           "accountId": "id_ecf4da10",
           "claim": "Engineers built an open-source tool called 'Response' to update status pages from Slack.",
           "url": "https://monzo.com/blog/2019/07/08/how-we-respond-to-incidents",
+          "sourceTitle": "How we respond to incidents — monzo.com",
+          "sourceType": "blog",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -230,6 +262,8 @@
           "accountId": "id_ecf4da10",
           "claim": "Platform team runs Kubernetes, Cassandra, Prometheus, Envoy, Kafka on AWS and GCP.",
           "url": "https://startup.jobs/platform-engineer-monzo-285094",
+          "sourceTitle": "Platform engineer monzo 285094 — startup.jobs",
+          "sourceType": "careers",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -239,6 +273,8 @@
           "accountId": "id_ecf4da10",
           "claim": "Engineering blog publishes detailed postmortems on incidents, like the July 2019 Cassandra scaling issue.",
           "url": "https://monzo.com/blog/2019/09/08/why-monzo-wasnt-working-on-july-29th",
+          "sourceTitle": "Why monzo wasnt working on july 29th — monzo.com",
+          "sourceType": "blog",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -248,6 +284,8 @@
           "accountId": "id_ecf4da10",
           "claim": "Actively hiring Site Reliability Engineers / Platform Engineers who participate in on-call and manage cloud infrastructure.",
           "url": "https://builtin.com/job/senior-platform-engineer/10054050",
+          "sourceTitle": "Senior platform engineer — builtin.com",
+          "sourceType": "careers",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -341,7 +379,10 @@
           "text": "Prometheus detects high latency in the core Cassandra cluster.",
           "personalizedFrom": [
             "id_b60d3ee3"
-          ]
+          ],
+          "actor": "system",
+          "system": "Prometheus",
+          "origin": "evidence"
         },
         {
           "order": 2,
@@ -349,7 +390,10 @@
           "text": "The alert pages the on-call Platform Engineer.",
           "personalizedFrom": [
             "id_9979a959"
-          ]
+          ],
+          "actor": "system",
+          "system": "On-call rotation",
+          "origin": "evidence"
         },
         {
           "order": 3,
@@ -357,13 +401,19 @@
           "text": "The engineer checks Kubernetes pod metrics and investigates the AWS instances.",
           "personalizedFrom": [
             "id_b60d3ee3"
-          ]
+          ],
+          "actor": "prospect",
+          "system": "Kubernetes on AWS",
+          "origin": "evidence"
         },
         {
           "order": 4,
           "phase": "response",
           "text": "The team coordinates in Slack to scale the Cassandra cluster and mitigate impact.",
-          "personalizedFrom": []
+          "personalizedFrom": [],
+          "actor": "prospect",
+          "system": "Slack",
+          "origin": "hypothesis"
         },
         {
           "order": 5,
@@ -372,13 +422,19 @@
           "personalizedFrom": [
             "id_ad0086d5",
             "id_1174df13"
-          ]
+          ],
+          "actor": "prospect",
+          "system": "Atlassian Statuspage",
+          "origin": "evidence"
         },
         {
           "order": 6,
           "phase": "postmortem",
           "text": "A detailed postmortem is written explaining the database scaling issue for their public blog.",
-          "personalizedFrom": []
+          "personalizedFrom": [],
+          "actor": "prospect",
+          "system": "Public engineering blog",
+          "origin": "hypothesis"
         }
       ]
     },
@@ -397,6 +453,8 @@
           "accountId": "id_snyk1",
           "claim": "Public status page is powered by Atlassian Statuspage.",
           "url": "https://snyk.statuspage.io/",
+          "sourceTitle": "snyk.statuspage.io",
+          "sourceType": "status-page",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -406,6 +464,8 @@
           "accountId": "id_snyk1",
           "claim": "Snyk adopted FireHydrant in June 2022 to standardize their incident response program without disrupting existing Slack workflows.",
           "url": "https://firehydrant.com/customer-stories/incident-response-change-management-without-disruption/",
+          "sourceTitle": "Incident response change management without disruption — firehydrant.com",
+          "sourceType": "blog",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -415,6 +475,8 @@
           "accountId": "id_snyk1",
           "claim": "Published a detailed public postmortem regarding their exposure to the Klue vendor breach and their swift incident response.",
           "url": "https://snyk.io/blog/when-a-vendors-breach-becomes-yours-lessons-from-the-klue-incident/",
+          "sourceTitle": "When a vendors breach becomes yours lessons from the klue incident — snyk.io",
+          "sourceType": "blog",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -424,6 +486,8 @@
           "accountId": "id_snyk1",
           "claim": "Security engineers published a postmortem detailing modern software supply chain attacks (Shai-Hulud) and response strategies.",
           "url": "https://snyk.io/blog/shai-hulud-post-mortem/",
+          "sourceTitle": "Shai hulud post mortem — snyk.io",
+          "sourceType": "blog",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -433,6 +497,8 @@
           "accountId": "id_snyk1",
           "claim": "A detailed root cause analysis published on a Snyk CLI command injection vulnerability (CVE-2022-40764).",
           "url": "https://safeguard.sh/resources/blog/snyk-cli-command-injection-cve-2022-40764-analysis",
+          "sourceTitle": "Snyk cli command injection cve 2022 40764 analysis — safeguard.sh",
+          "sourceType": "blog",
           "observedAt": "2026-09-18",
           "confidence": "high",
           "kind": "observed"
@@ -530,13 +596,19 @@
           "text": "A critical supply chain vulnerability alert triggers from their internal scanning tools.",
           "personalizedFrom": [
             "id_f7026808"
-          ]
+          ],
+          "actor": "system",
+          "system": "Internal vulnerability scanning",
+          "origin": "evidence"
         },
         {
           "order": 2,
           "phase": "routing",
           "text": "The alert is routed to the on-call Security Engineer via Slack.",
-          "personalizedFrom": []
+          "personalizedFrom": [],
+          "actor": "system",
+          "system": "Slack",
+          "origin": "hypothesis"
         },
         {
           "order": 3,
@@ -544,7 +616,10 @@
           "text": "The engineer investigates the affected dependencies and assesses the potential impact on customer environments.",
           "personalizedFrom": [
             "id_f7026808"
-          ]
+          ],
+          "actor": "prospect",
+          "system": "Dependency analysis",
+          "origin": "evidence"
         },
         {
           "order": 4,
@@ -552,7 +627,10 @@
           "text": "The team opens an incident in Slack using FireHydrant to coordinate the remediation.",
           "personalizedFrom": [
             "id_df2e88fc"
-          ]
+          ],
+          "actor": "prospect",
+          "system": "FireHydrant in Slack",
+          "origin": "evidence"
         },
         {
           "order": 5,
@@ -560,7 +638,10 @@
           "text": "An update is posted to their Atlassian Statuspage informing customers of the ongoing investigation.",
           "personalizedFrom": [
             "id_0f99fa41"
-          ]
+          ],
+          "actor": "prospect",
+          "system": "Atlassian Statuspage",
+          "origin": "evidence"
         },
         {
           "order": 6,
@@ -568,7 +649,10 @@
           "text": "A transparent postmortem is published on their blog detailing the vulnerability and their response.",
           "personalizedFrom": [
             "id_f8d0702e"
-          ]
+          ],
+          "actor": "prospect",
+          "system": "Public security blog",
+          "origin": "evidence"
         }
       ]
     }

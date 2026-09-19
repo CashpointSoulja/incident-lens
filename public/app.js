@@ -131,6 +131,16 @@ const Storage = {
 
 /* ---------- models (mirror data/schema.md 1:1) ---------- */
 
+// Closed vocabularies from data/schema.md. Anything outside them is coerced to
+// the neutral member rather than silently carried through.
+const EVIDENCE_SOURCE_TYPES = ['status-page', 'careers', 'engineering', 'blog', 'github', 'homepage', 'other'];
+const SCENARIO_ACTORS = ['prospect', 'incident.io', 'system'];
+
+const SOURCE_TYPE_LABEL = {
+  'status-page': 'Status page', careers: 'Careers page', engineering: 'Engineering page',
+  blog: 'Blog post', github: 'GitHub', homepage: 'Company homepage', other: 'Public page',
+};
+
 const Models = {
   account(a) {
     return {
@@ -149,6 +159,11 @@ const Models = {
       accountId: e.accountId,
       claim: e.claim,
       url: e.url,
+      // What the page called itself, and what kind of public page it was, so a
+      // reader can tell a careers ad apart from a status page or an engineering
+      // post without opening the link.
+      sourceTitle: e.sourceTitle || '',
+      sourceType: EVIDENCE_SOURCE_TYPES.includes(e.sourceType) ? e.sourceType : 'other',
       observedAt: e.observedAt,
       confidence: e.confidence, // high|medium|low
       kind: e.kind, // observed|inferred
@@ -206,11 +221,19 @@ const Models = {
     };
   },
   scenarioStep(s) {
+    const personalizedFrom = s.personalizedFrom || [];
     return {
       order: s.order,
       phase: s.phase, // alert|routing|investigation|response|customer-update|postmortem
       text: s.text,
-      personalizedFrom: s.personalizedFrom || [],
+      personalizedFrom,
+      // Who acts, what they act on, and whether the step is grounded in public
+      // evidence or is an illustrative hypothesis.
+      actor: SCENARIO_ACTORS.includes(s.actor) ? s.actor : 'prospect', // prospect|incident.io|system
+      system: s.system || '',
+      origin: s.origin === 'evidence' || s.origin === 'hypothesis'
+        ? s.origin
+        : (personalizedFrom.length ? 'evidence' : 'hypothesis'),
     };
   },
   roiAssumption({ id, accountId, key, label, value, unit, editable, note, min, step, lever }) {
@@ -228,7 +251,8 @@ const Models = {
       lever, // downtime|engineer-time|consolidation
     };
   },
-  briefVersion({ id, accountId, version, mode, createdAt, assumptions }) {
+  briefVersion({ id, accountId, version, mode, createdAt, assumptions, content }) {
+    const c = content || {};
     return {
       id: id || uid('brief'),
       accountId,
@@ -241,13 +265,33 @@ const Models = {
       roiAssumptions: Object.freeze((assumptions || []).map((a) => Object.freeze({
         id: a.id, key: a.key, label: a.label, value: a.value, unit: a.unit, lever: a.lever,
       }))),
+      // Immutable snapshot of the brief as generated, not just its ROI inputs:
+      // a stored version can be re-read exactly as it was written, even if the
+      // matcher rules or the account's evidence change later.
+      content: Object.freeze({
+        headline: c.headline || '',
+        hypotheses: Object.freeze((c.hypotheses || []).map((h) => Object.freeze({
+          id: h.id, statement: h.statement, confidence: h.confidence, evidenceIds: Object.freeze((h.evidenceIds || []).slice()),
+        }))),
+        questions: Object.freeze((c.questions || []).slice()),
+        recommendations: Object.freeze((c.recommendations || []).map((r) => Object.freeze({
+          id: r.id, ruleId: r.ruleId, title: r.title, area: r.area, reason: r.reason,
+          evidenceIds: Object.freeze((r.evidenceIds || []).slice()),
+        }))),
+        scenarioSteps: Object.freeze((c.scenarioSteps || []).map((s) => Object.freeze({
+          order: s.order, phase: s.phase, text: s.text, actor: s.actor, system: s.system, origin: s.origin,
+        }))),
+      }),
       createdAt: createdAt || nowIso(),
     };
   },
-  feedbackEvent({ id, briefId, useful, comment, at }) {
+  feedbackEvent({ id, briefId, recommendationId, useful, comment, at }) {
     return {
       id: id || uid('fb'),
       briefId,
+      // Set when the feedback is about one specific recommendation; null when
+      // it is about the brief as a whole.
+      recommendationId: recommendationId || null,
       useful: !!useful,
       comment: comment || '',
       at: at || nowIso(),
@@ -284,8 +328,35 @@ const FeedbackStore = {
     Storage.set('feedback', list);
     return list;
   },
-  forBrief(briefId) {
-    return FeedbackStore.all().filter((f) => f.briefId === briefId);
+};
+
+/* ---------- live bundle persistence ----------------------------------------
+ * Fixtures ship with the build, but a live-researched bundle only exists
+ * because someone ran a lookup. Keeping it in memory meant a reload (or a
+ * re-opened link) lost the prospect entirely, so the full bundle is written to
+ * a versioned localStorage key and hydrated back into DataStore on load.
+ * ------------------------------------------------------------------------- */
+
+const LIVE_BUNDLES_KEY = 'il-live-bundles-v1';
+const LIVE_BUNDLES_MAX = 12;
+
+const LiveBundleStore = {
+  all() {
+    const list = Storage.get(LIVE_BUNDLES_KEY, []);
+    return Array.isArray(list) ? list.filter((b) => b && b.account && b.account.id) : [];
+  },
+  save(bundle) {
+    const list = LiveBundleStore.all().filter((b) => b.account.id !== bundle.account.id);
+    list.unshift(bundle);
+    while (list.length > LIVE_BUNDLES_MAX) list.pop();
+    Storage.set(LIVE_BUNDLES_KEY, list);
+    return list;
+  },
+  // Domain of a stored live bundle, used to offer a re-run when a link points
+  // at a live account this browser never researched.
+  domainFor(accountId) {
+    const found = LiveBundleStore.all().find((b) => b.account.id === accountId);
+    return found ? found.account.domain : null;
   },
 };
 
@@ -336,6 +407,7 @@ const DataStore = {
       DataStore.accounts = fixtures.map((fx) => DataStore.normalizeBundle(fx));
       DataStore.capabilities = (kbJson.capabilities || []).map(Models.capability);
       DataStore.integrations = (kbJson.integrations || []).map(Models.integration);
+      DataStore.hydrateLiveBundles();
 
       DataStore.status = 'ready';
     } catch (err) {
@@ -356,12 +428,24 @@ const DataStore = {
     };
   },
 
-  addLiveBundle(raw) {
+  // `persist: false` is used when hydrating from storage, so reading a bundle
+  // back does not rewrite what it was just read from.
+  addLiveBundle(raw, opts) {
     const bundle = DataStore.normalizeBundle(raw);
     const index = DataStore.accounts.findIndex((a) => a.account.id === bundle.account.id);
     if (index >= 0) DataStore.accounts[index] = bundle;
     else DataStore.accounts.unshift(bundle);
+    if (!opts || opts.persist !== false) LiveBundleStore.save(bundle);
     return bundle;
+  },
+
+  // Live bundles researched in an earlier session, restored so a reload or a
+  // re-opened link still finds the prospect.
+  hydrateLiveBundles() {
+    LiveBundleStore.all().forEach((raw) => {
+      try { DataStore.addLiveBundle(raw, { persist: false }); } catch { /* skip an unreadable stored bundle rather than failing the whole load */ }
+    });
+    return DataStore.accounts;
   },
 
   getAccountBundle(accountId) {
@@ -440,6 +524,37 @@ const Matcher = {
     },
   ],
 
+  /* ---- claims guard for LIVE accounts ------------------------------------
+   * Live extraction establishes exactly one thing: that a term appeared on a
+   * public page. It does not establish that the company runs that thing, staffs
+   * a rotation, or has any workflow at all. Fixture accounts are curated, so
+   * their reasons stand as written; for `account.live === true` accounts every
+   * reason is rebuilt as observation-then-hypothesis, named against the kind of
+   * page the mention came from. "Publicly mentions X" never becomes "runs X".
+   * ---------------------------------------------------------------------- */
+
+  // Names the evidence kind behind a match, e.g. "their public careers page".
+  mentionSource(evidences, evidenceIds) {
+    const ev = (evidenceIds || []).map((id) => byId(evidences, id)).find(Boolean);
+    if (!ev) return 'their public pages';
+    const label = (SOURCE_TYPE_LABEL[ev.sourceType] || SOURCE_TYPE_LABEL.other).toLowerCase();
+    return ev.sourceType === 'github' ? 'their public GitHub presence' : `their public ${label}`;
+  },
+
+  guardedCapabilityReason(signal, capability, evidences) {
+    const src = Matcher.mentionSource(evidences, signal.evidenceIds);
+    return `${src.slice(0, 1).toUpperCase()}${src.slice(1)} mentions "${signal.label}". `
+      + 'A mention on a public page is an observation, not a confirmed practice - nothing read here shows how, or whether, they work this way. '
+      + `If discovery confirms it reflects their setup, ${capability.product} - ${capability.name} is the capability worth exploring.`;
+  },
+
+  guardedIntegrationReason(integration, hit, evidences) {
+    const src = Matcher.mentionSource(evidences, hit.evidenceIds);
+    return `${src.slice(0, 1).toUpperCase()}${src.slice(1)} names "${integration.name}" ("${hit.text}"). `
+      + 'A public mention is not evidence that it sits in their incident workflow. '
+      + `If it does, incident.io has an official ${integration.name} integration to check against it.`;
+  },
+
   // Deterministic text-scan for integrations: an integration is only ever
   // recommended when its exact name appears in the account's own public
   // evidence text, never guessed. The account's own name is excluded so a
@@ -460,7 +575,9 @@ const Matcher = {
         accountId: account.id,
         integrationId: integration.id,
         ruleId: 'rule-mentioned-in-evidence',
-        reasons: [`Public evidence explicitly mentions "${integration.name}" ("${hit.text}"), so the official incident.io ${integration.name} integration would plug directly into the workflow they already run.`],
+        reasons: [account.live
+          ? Matcher.guardedIntegrationReason(integration, hit, evidences)
+          : `Public evidence explicitly mentions "${integration.name}" ("${hit.text}"), so the official incident.io ${integration.name} integration would plug directly into the workflow they already run.`],
         evidenceIds: hit.evidenceIds,
       }));
     });
@@ -468,19 +585,22 @@ const Matcher = {
   },
 
   matchCapabilities(accountBundle, capabilities) {
-    const { account, signals } = accountBundle;
+    const { account, signals, evidences } = accountBundle;
     const recs = [];
     signals.forEach((signal) => {
       const label = signal.label.toLowerCase();
       Matcher.CAPABILITY_RULES.forEach((rule) => {
         if (!rule.test(label)) return;
         rule.capabilityIds.forEach((capId) => {
-          if (!byId(capabilities, capId)) return;
+          const capability = byId(capabilities, capId);
+          if (!capability) return;
           recs.push(Models.recommendation({
             accountId: account.id,
             capabilityId: capId,
             ruleId: rule.id,
-            reasons: [rule.reason(signal.label)],
+            reasons: [account.live
+              ? Matcher.guardedCapabilityReason(signal, capability, evidences)
+              : rule.reason(signal.label)],
             evidenceIds: signal.evidenceIds,
           }));
         });
@@ -774,8 +894,13 @@ const RoiUrl = {
   },
 };
 
+// Live share links carry the researched domain as well as the ROI assumptions:
+// a live account id is a hash, so without the domain a recipient who has never
+// run that lookup has nothing to re-run.
 function shareHash(accountId, assumptions) {
-  return `#/a/${accountId}/share?roi=${encodeURIComponent(RoiUrl.encode(assumptions))}`;
+  const bundle = DataStore.getAccountBundle(accountId);
+  const domainParam = bundle && bundle.account.live ? `&d=${encodeURIComponent(bundle.account.domain)}` : '';
+  return `#/a/${accountId}/share?roi=${encodeURIComponent(RoiUrl.encode(assumptions))}${domainParam}`;
 }
 
 function shareUrl(accountId, assumptions) {
@@ -819,16 +944,63 @@ function loadAccountViewData(accountId) {
 }
 
 function accountViewData(accountId) {
-  return state.viewData[accountId] || { internalBrief: null, shareBrief: null, recentEvents: [] };
+  return state.viewData[accountId] || { internalBrief: null, shareBrief: null, recentEvents: [], share: null };
 }
 
-// Freeze a brief version together with the ROI assumptions it was saved with.
+// Route preparation for the share screen. Share mode is a single consolidated
+// screen, so everything it needs is resolved here - the bundle, the
+// deterministic recommendations, the knowledge base and the ROI assumptions
+// (initialized, not created by the render) - and handed over via state.viewData.
+function prepareShareView(accountId) {
+  const bundle = DataStore.getAccountBundle(accountId);
+  if (!bundle) return null;
+  const view = {
+    bundle,
+    recommendations: Matcher.buildRecommendations(bundle, DataStore.capabilities, DataStore.integrations),
+    capabilities: DataStore.capabilities,
+    integrations: DataStore.integrations,
+    assumptions: ensureRoiState(accountId).assumptions,
+  };
+  const snapshot = state.viewData[accountId] || loadAccountViewData(accountId);
+  snapshot.share = view;
+  return view;
+}
+
+// The generated brief as content: hypotheses, discovery questions, the
+// deterministic product map and the scenario, resolved to the copy actually
+// shown. Pure - it reads the bundle and the knowledge base, nothing else.
+function buildBriefContent(bundle, recs) {
+  const { account, hypotheses, scenarioSteps } = bundle;
+  return {
+    headline: `${account.name} - reliability story from ${bundle.evidences.length} public source${bundle.evidences.length === 1 ? '' : 's'}`,
+    hypotheses: hypotheses.map((h) => ({ id: h.id, statement: h.statement, confidence: h.confidence, evidenceIds: h.evidenceIds })),
+    questions: Matcher.deriveDiscoveryQuestions(hypotheses),
+    recommendations: recs.map((r) => {
+      const capability = r.capabilityId ? byId(DataStore.capabilities, r.capabilityId) : null;
+      const integration = r.integrationId ? byId(DataStore.integrations, r.integrationId) : null;
+      return {
+        id: r.id,
+        ruleId: r.ruleId,
+        title: capability ? capability.name : integration ? integration.name : '',
+        area: capability ? capability.product : integration ? `${integration.category} integration` : '',
+        reason: r.reasons[0] || '',
+        evidenceIds: r.evidenceIds,
+      };
+    }),
+    scenarioSteps,
+  };
+}
+
+// Freeze a brief version together with the content and the ROI assumptions it
+// was saved with.
 function saveVersion(accountId, mode) {
+  const bundle = DataStore.getAccountBundle(accountId);
   const brief = Models.briefVersion({
     accountId,
     version: BriefVersionStore.nextVersionNumber(accountId, mode),
     mode,
     assumptions: ensureRoiState(accountId).assumptions,
+    content: bundle ? buildBriefContent(bundle, Matcher.buildRecommendations(bundle, DataStore.capabilities, DataStore.integrations)) : null,
   });
   BriefVersionStore.add(brief);
   recordEvent('brief-built', { accountId, version: brief.version, mode });
@@ -855,9 +1027,30 @@ function checkFixtureIntegrity(accountId, bundle) {
   }
 }
 
-function recordFeedback(accountId, briefId, useful) {
-  const fb = FeedbackStore.add(Models.feedbackEvent({ briefId, useful }));
-  recordEvent('feedback', { accountId, useful, briefId });
+// Controller action for a live lookup: fetch, persist the bundle so it survives
+// a reload, and record the event trail. Shared by the picker form and the
+// recovery screen, which differ only in how they report progress.
+async function runLiveResearch(rawDomain) {
+  recordEvent('domain-lookup-started', { domain: rawDomain });
+  let payload;
+  try {
+    const response = await fetch(`/api/research?domain=${encodeURIComponent(rawDomain)}`, { cache: 'no-store' });
+    payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || `Research failed (${response.status}).`);
+  } catch (error) {
+    const message = error && error.message ? error.message : 'Live research failed. Try the root company domain.';
+    recordEvent('domain-lookup-failed', { domain: rawDomain, error: message });
+    throw new Error(message);
+  }
+  const bundle = DataStore.addLiveBundle(payload);
+  recordEvent('domain-lookup-completed', { domain: bundle.account.domain, accountId: bundle.account.id, sources: bundle.evidences.length });
+  return bundle;
+}
+
+function recordFeedback(accountId, briefId, useful, recommendationId) {
+  const recId = recommendationId || null;
+  const fb = FeedbackStore.add(Models.feedbackEvent({ briefId, recommendationId: recId, useful }));
+  recordEvent(recId ? 'recommendation-feedback' : 'feedback', { accountId, useful, briefId, recommendationId: recId });
   return fb;
 }
 
@@ -966,10 +1159,94 @@ function aboutBuildNote() {
   `;
 }
 
+// Copy guard for live accounts, used by both the AE brief and the share view.
+// A live lookup establishes only that a term appeared on a public page, so the
+// surrounding copy has to frame capability fit as a hypothesis. Fixture copy is
+// curated evidence and is left exactly as written.
+const LiveCopy = {
+  note(account) {
+    return account.live
+      ? 'Live research establishes only that these terms appear on public pages we could read. How they actually work is a hypothesis to test, not a finding.'
+      : '';
+  },
+  pick(account, liveText, fixtureText) {
+    return account.live ? liveText : fixtureText;
+  },
+};
+
 function evidenceCountSummary(bundle) {
   const observed = bundle.evidences.filter((e) => e.kind === 'observed').length;
   const inferred = bundle.evidences.filter((e) => e.kind === 'inferred').length;
   return { observed, inferred, total: bundle.evidences.length };
+}
+
+/* A link can point at a live account this browser has never researched: it was
+ * shared with someone else, or local storage was cleared. A live account id is a
+ * content hash of the domain, so the domain cannot be read back out of the id -
+ * it comes from a stored bundle when there is one, or from the `d` parameter the
+ * share link carries. Either way the answer is an offer to re-run the lookup,
+ * never a dead end. */
+function screenLiveRecovery(route) {
+  const accountId = route.accountId;
+  renderStepRail(null);
+  renderModeSwitch(null);
+  setActionBar('');
+  const domain = (route.query && route.query.d) || LiveBundleStore.domainFor(accountId) || '';
+  renderView(`
+    <div class="section-head">
+      <div class="eyebrow">Live prospect<span class="sep">·</span>Not in this browser</div>
+      <h1>This link needs a fresh lookup</h1>
+      <p class="lede">Live research is held locally, so a link opened in another browser (or after local data was cleared) has no bundle to show. Nothing is reconstructed from memory - re-run the lookup and the same public pages are read again.</p>
+    </div>
+    <form id="recover-form" class="card domain-form live-domain-form">
+      <label class="small" for="recover-input" style="font-weight:600;">Company domain</label>
+      <div class="row" style="flex-wrap:nowrap;">
+        <input id="recover-input" name="domain" type="text" inputmode="url" autocomplete="off" class="text-input" placeholder="e.g. incident.io" value="${escapeHtml(domain)}" required />
+        <button class="btn btn-primary" id="recover-submit" type="submit">Re-run live research</button>
+      </div>
+      <div class="tiny muted" id="recover-status" role="status" aria-live="polite">${domain
+        ? `We know this link pointed at <span class="mono">${escapeHtml(domain)}</span>. Re-running reads its public pages now - results can differ from what the sender saw.`
+        : 'The domain is not recoverable from the link alone. Enter it to run the same lookup.'}</div>
+      <p class="tiny muted"><span class="mono">${escapeHtml(accountId)}</span></p>
+    </form>
+    <div class="row" style="margin-top:12px;"><a class="btn" href="#/">Back to prospects</a></div>
+  `);
+
+  document.getElementById('recover-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const input = document.getElementById('recover-input');
+    const submit = document.getElementById('recover-submit');
+    const status = document.getElementById('recover-status');
+    const raw = input.value.trim();
+    if (!raw) return;
+    input.disabled = true;
+    submit.disabled = true;
+    submit.classList.add('is-working');
+    submit.setAttribute('aria-busy', 'true');
+    submit.innerHTML = '<span class="spinner" aria-hidden="true"></span>Researching…';
+    status.classList.remove('is-error');
+    status.textContent = 'Reading public pages now. Anything we cannot read is left out, not guessed.';
+    try {
+      const bundle = await runLiveResearch(raw);
+      if (bundle.account.id === accountId) {
+        showToast('Live research re-run - this link works again.');
+        forceFreshRender = true;
+        render();
+      } else {
+        showToast(`Researched ${bundle.account.domain}, which is a different prospect to the one this link pointed at.`);
+        location.hash = `#/a/${bundle.account.id}/evidence`;
+      }
+    } catch (error) {
+      status.textContent = error && error.message ? error.message : 'Live research failed. Try the root company domain.';
+      status.classList.add('is-error');
+      input.disabled = false;
+      submit.disabled = false;
+      submit.classList.remove('is-working');
+      submit.removeAttribute('aria-busy');
+      submit.textContent = 'Re-run live research';
+      input.focus();
+    }
+  });
 }
 
 function screenAccountPicker() {
@@ -1081,20 +1358,14 @@ function screenAccountPicker() {
       routeIdx = (routeIdx + 1) % routes.length;
       status.querySelectorAll('.progress-routes .chip').forEach((c, j) => c.classList.toggle('is-now', j === routeIdx));
     }, 1800);
-    recordEvent('domain-lookup-started', { domain: raw });
     try {
-      const response = await fetch(`/api/research?domain=${encodeURIComponent(raw)}`, { cache: 'no-store' });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || `Research failed (${response.status}).`);
-      const bundle = DataStore.addLiveBundle(payload);
-      recordEvent('domain-lookup-completed', { domain: bundle.account.domain, accountId: bundle.account.id, sources: bundle.evidences.length });
+      const bundle = await runLiveResearch(raw);
       clearInterval(cycle);
       location.hash = `#/a/${bundle.account.id}/evidence`;
     } catch (error) {
       clearInterval(cycle);
       status.textContent = error && error.message ? error.message : 'Live research failed. Try the root company domain.';
       status.classList.add('is-error');
-      recordEvent('domain-lookup-failed', { domain: raw, error: status.textContent });
       submit.disabled = false;
       submit.classList.remove('is-working');
       submit.removeAttribute('aria-busy');
@@ -1123,13 +1394,18 @@ function accountHeader(account, subtitle) {
   `;
 }
 
+function sourceTypeChip(sourceType) {
+  return `<span class="chip">${escapeHtml(SOURCE_TYPE_LABEL[sourceType] || SOURCE_TYPE_LABEL.other)}</span>`;
+}
+
 function evidenceCardHtml(evidence) {
   return `
     <div class="ev ${evidence.kind}">
-      <div class="chiprow">${kindChip(evidence.kind)}${confidenceChip(evidence.confidence)}</div>
+      <div class="chiprow">${kindChip(evidence.kind)}${confidenceChip(evidence.confidence)}${sourceTypeChip(evidence.sourceType)}</div>
       <p class="claim">${escapeHtml(evidence.claim)}</p>
       <dl class="meta">
         <dt>Source</dt><dd>${sourceLink(evidence.url)}</dd>
+        ${evidence.sourceTitle ? `<dt>Page</dt><dd>${escapeHtml(evidence.sourceTitle)}</dd>` : ''}
         <dt>Observed</dt><dd class="mono">${fmtDate(evidence.observedAt)}</dd>
       </dl>
     </div>
@@ -1178,7 +1454,12 @@ function hypothesisCard(h, evidences) {
   `;
 }
 
-function recommendationCard(rec, capabilities, integrations, evidences) {
+// One renderer for both surfaces. The AE view adds the "Why this?" lead-in and
+// the rule id; the prospect-safe share view shows the same reason without the
+// internal rule plumbing. The lookup/markup itself is shared so the two views
+// can never drift apart.
+function recommendationCard(rec, capabilities, integrations, evidences, opts) {
+  const mode = (opts && opts.mode) === 'share' ? 'share' : 'internal';
   const capability = rec.capabilityId ? byId(capabilities, rec.capabilityId) : null;
   const integration = rec.integrationId ? byId(integrations, rec.integrationId) : null;
   const area = capability ? capability.product : `${integration.category} integration`;
@@ -1191,12 +1472,17 @@ function recommendationCard(rec, capabilities, integrations, evidences) {
       <div class="rec-head"><span class="chip">${escapeHtml(area)}</span></div>
       <h3>${escapeHtml(title)}</h3>
       <p class="small muted">${escapeHtml(desc)}</p>
-      <p class="rec-why"><strong>Why this?</strong> ${escapeHtml(rec.reasons[0])}</p>
+      <p class="rec-why">${mode === 'internal' ? '<strong>Why this?</strong> ' : ''}${escapeHtml(rec.reasons[0])}</p>
       <div class="rec-foot">
         ${sourceLink(sourceUrl, 'Official incident.io page')}
         ${supporting.map((e) => sourceLink(e.url, `Evidence: ${e.claim.slice(0, 36)}${e.claim.length > 36 ? '…' : ''}`)).join('')}
       </div>
+      ${mode === 'internal' ? `
       <p class="tiny muted" style="margin-top:10px;">Rule <span class="mono">${escapeHtml(rec.ruleId)}</span></p>
+      <div class="row" style="margin-top:6px;">
+        <button class="btn btn-sm" type="button" data-rec-feedback="useful" data-rec-id="${escapeHtml(rec.id)}" aria-pressed="false">Good match</button>
+        <button class="btn btn-sm" type="button" data-rec-feedback="not-useful" data-rec-id="${escapeHtml(rec.id)}" aria-pressed="false">Off the mark</button>
+      </div>` : ''}
     </div>
   `;
 }
@@ -1212,7 +1498,7 @@ function screenBrief(accountId) {
 
   if (!built) {
     renderView(`
-      ${accountHeader(account, 'Signals are normalized from the evidence ledger. Tap below to turn them into three evidence-backed hypotheses and a deterministic product map.')}
+      ${accountHeader(account, 'Signals are normalized from the evidence ledger. Tap below to turn them into evidence-backed hypotheses and a deterministic product map.')}
       <div class="section-head"><div class="eyebrow">Signals<span class="sep">·</span>${signals.length} normalized from evidence</div></div>
       <div class="card">
         <div class="chiprow">
@@ -1221,7 +1507,7 @@ function screenBrief(accountId) {
       </div>
       <div class="empty" style="margin-top:14px;">
         <h3>Nothing written yet - on purpose</h3>
-        <p class="small">Tap <strong>Build the reliability story</strong> and these ${signals.length} signals become three hypotheses, discovery questions and a product map. All from the evidence ledger; nothing invented.</p>
+        <p class="small">Tap <strong>Build the reliability story</strong> and these ${signals.length} signals become ${hypotheses.length} evidence-backed hypothes${hypotheses.length === 1 ? 'is' : 'es'}, discovery questions and a product map. All from the evidence ledger; nothing invented.</p>
         <div class="skeleton-preview" aria-hidden="true">
           <div class="skeleton skeleton-line" style="width:56%"></div>
           <div class="skeleton skeleton-line" style="width:84%"></div>
@@ -1247,7 +1533,7 @@ function screenBrief(accountId) {
       if (prefersReducedMotion()) { finish(); return; }
       // Staged reveal (~1s): name what is actually being used, in order. The
       // result is deterministic and instant; this only makes the step legible.
-      const stages = [`Reading ${signals.length} signals`, 'Drafting three hypotheses', 'Matching capabilities by rule'];
+      const stages = [`Reading ${signals.length} signals`, `Drafting ${hypotheses.length} hypothes${hypotheses.length === 1 ? 'is' : 'es'}`, 'Matching capabilities by rule'];
       btn.dataset.working = '1';
       btn.classList.add('is-working');
       btn.setAttribute('aria-busy', 'true');
@@ -1275,11 +1561,13 @@ function screenBrief(accountId) {
   const { internalBrief: brief, recentEvents } = accountViewData(accountId);
 
   renderView(`
-    ${accountHeader(account, 'Fact kept apart from interpretation: hypotheses are marked inferred, and every recommendation shows its rule and evidence.')}
+    ${accountHeader(account, LiveCopy.pick(account,
+      'Fact kept apart from interpretation. For a live lookup the facts are the public mentions themselves; everything drawn from them is phrased as a hypothesis, with its rule and evidence shown.',
+      'Fact kept apart from interpretation: hypotheses are marked inferred, and every recommendation shows its rule and evidence.'))}
 
     <div class="section-head">
       <div class="eyebrow">Reliability story<span class="sep">·</span>${hypotheses.length} hypotheses</div>
-      <h2>Three things worth checking</h2>
+      <h2>${hypotheses.length === 1 ? 'One thing worth checking' : hypotheses.length ? `${hypotheses.length} things worth checking` : 'Nothing to check yet'}</h2>
       <p class="small muted">Never presented as fact - always "might" or "could", always linked to evidence.</p>
     </div>
     <div class="stack">
@@ -1299,8 +1587,8 @@ function screenBrief(accountId) {
 
     <div class="section-head">
       <div class="eyebrow">Product map<span class="sep">·</span>${capRecs.length} capability match${capRecs.length === 1 ? '' : 'es'}</div>
-      <h2>Where incident.io fits</h2>
-      <p class="small muted">Matcher <span class="mono">${escapeHtml(Matcher.version)}</span>, deterministic rules only - every match shows its rule and evidence.</p>
+      <h2>${LiveCopy.pick(account, 'Where incident.io might fit', 'Where incident.io fits')}</h2>
+      <p class="small muted">Matcher <span class="mono">${escapeHtml(Matcher.version)}</span>, deterministic rules only - every match shows its rule and evidence. ${escapeHtml(LiveCopy.note(account))}</p>
     </div>
     <div class="stack">
       ${capRecs.length ? capRecs.map((r) => recommendationCard(r, DataStore.capabilities, DataStore.integrations, evidences)).join('') : renderEmpty('No capability matches', 'No signal matched a capability rule for this account.')}
@@ -1308,8 +1596,10 @@ function screenBrief(accountId) {
 
     <div class="section-head">
       <div class="eyebrow">Integrations<span class="sep">·</span>${intRecs.length} named in evidence</div>
-      <h2>Plugs into what they run</h2>
-      <p class="small muted">Only recommended when the integration's name appears in the account's own public evidence.</p>
+      <h2>${LiveCopy.pick(account, 'Named on their public pages', 'Plugs into what they run')}</h2>
+      <p class="small muted">${LiveCopy.pick(account,
+        'Only listed when the name appears on a public page we read. A mention is not evidence that the tool sits in their incident workflow.',
+        'Only recommended when the integration\'s name appears in the account\'s own public evidence.')}</p>
     </div>
     <div class="stack">
       ${intRecs.length ? intRecs.map((r) => recommendationCard(r, DataStore.capabilities, DataStore.integrations, evidences)).join('') : renderEmpty('No integration matches', 'No public evidence explicitly named one of the official integrations for this account.')}
@@ -1362,6 +1652,18 @@ function screenBrief(accountId) {
     });
   });
 
+  // Feedback on a single recommendation carries that recommendation's id, so
+  // the matcher can be tuned rule by rule rather than only brief by brief.
+  dom.view.querySelectorAll('[data-rec-feedback]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const recId = btn.getAttribute('data-rec-id');
+      const useful = btn.getAttribute('data-rec-feedback') === 'useful';
+      recordFeedback(accountId, brief ? brief.id : null, useful, recId);
+      dom.view.querySelectorAll(`[data-rec-id="${recId}"]`).forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
+      showToast(useful ? 'Recorded: good match.' : 'Recorded: off the mark.');
+    });
+  });
+
   const copyPayloadBtn = document.getElementById('copy-sf-payload');
   if (copyPayloadBtn) {
     copyPayloadBtn.addEventListener('click', async () => {
@@ -1391,6 +1693,12 @@ const PHASE_LABEL = {
   postmortem: 'Postmortem',
 };
 
+const ACTOR_LABEL = {
+  prospect: 'Their team',
+  'incident.io': 'incident.io',
+  system: 'Automated system',
+};
+
 const scenarioActiveStep = {}; // accountId -> order (1-based)
 
 function scenarioStepHtml(step, signals, isActive, isDone, showState) {
@@ -1409,7 +1717,8 @@ function scenarioStepHtml(step, signals, isActive, isDone, showState) {
           ${stateChip}
         </div>
         <p>${escapeHtml(step.text)}</p>
-        ${personalized.length
+        <p class="tiny muted">${escapeHtml(ACTOR_LABEL[step.actor] || ACTOR_LABEL.prospect)}${step.system ? ` · ${escapeHtml(step.system)}` : ''}</p>
+        ${step.origin === 'evidence' && personalized.length
           ? `<div class="step-src"><span class="tiny muted">From observed signals</span><div class="chiprow">${personalized.map((s) => `<span class="chip chip-strong">${escapeHtml(s.label)}</span>`).join('')}</div></div>`
           : `<span class="chip chip-unknown"><span class="g">?</span> Illustrative - not tied to observed evidence</span>`}
       </div>
@@ -1437,7 +1746,9 @@ function screenScenario(accountId) {
   const active = clamp(scenarioActiveStep[accountId], 1, scenarioSteps.length);
 
   renderView(`
-    ${accountHeader(account, 'A compact incident walkthrough personalized to their observed or hypothesized stack. Steps not tied to public evidence are clearly marked illustrative, never presented as fact.')}
+    ${accountHeader(account, LiveCopy.pick(account,
+      'A compact incident walkthrough. Systems named here come from public mentions, not a confirmed inventory - the walkthrough is a hypothesis to test, and steps not tied to public evidence are marked illustrative.',
+      'A compact incident walkthrough personalized to their observed or hypothesized stack. Steps not tied to public evidence are clearly marked illustrative, never presented as fact.'))}
     <div class="section-head"><div class="eyebrow">Scenario<span class="sep">·</span>Step ${active} of ${scenarioSteps.length}<span class="sep">·</span>${escapeHtml(PHASE_LABEL[scenarioSteps[active - 1].phase] || scenarioSteps[active - 1].phase)}</div></div>
     <ol class="rail">
       ${scenarioSteps.map((s) => scenarioStepHtml(s, signals, s.order === active, s.order < active)).join('')}
@@ -1664,25 +1975,24 @@ function buildSalesforcePayload(bundle, recs, roiResults, briefVersion) {
  * ========================================================================= */
 
 function screenShare(accountId) {
-  const bundle = DataStore.getAccountBundle(accountId);
-  if (!bundle) return renderFailure('Account not found', 'That prospect id does not match a loaded fixture.', '#/');
+  // Bundle, recommendations, knowledge base and ROI assumptions were all
+  // resolved by the controller (prepareShareView) before this render ran, and
+  // the share version was saved by ensureShareVersion; this function only reads.
+  const { share, shareBrief: brief } = accountViewData(accountId);
+  if (!share) return renderFailure('Account not found', 'That prospect id does not match a loaded prospect.', '#/');
   renderStepRail(null); // share mode is a single screen, not part of the AE step flow
   renderModeSwitch(accountId);
 
+  const { bundle, recommendations: recs, capabilities, integrations, assumptions } = share;
   const { account, evidences, hypotheses, scenarioSteps, signals } = bundle;
-  const recs = Matcher.buildRecommendations(bundle, DataStore.capabilities, DataStore.integrations);
   const capRecs = recs.filter((r) => r.capabilityId);
   const intRecs = recs.filter((r) => r.integrationId);
-  const roiState = ensureRoiState(accountId);
-  const values = Roi.assumptionsAsMap(roiState.assumptions);
-  const results = Roi.calculate(values);
-
-  // The share version is saved by the controller (ensureShareVersion) before
-  // this render runs; this function only reads it.
-  const brief = accountViewData(accountId).shareBrief;
+  const results = Roi.calculate(Roi.assumptionsAsMap(assumptions));
 
   renderView(`
-    ${accountHeader(account, 'A prospect-safe summary: sources and uncertainty stay visible, internal notes and sales-only language are removed.')}
+    ${accountHeader(account, LiveCopy.pick(account,
+      'A prospect-safe summary of a live public-page lookup. What was read is shown as read; anything about how you work is phrased as a question, not a claim. Internal notes and sales-only language are removed.',
+      'A prospect-safe summary: sources and uncertainty stay visible, internal notes and sales-only language are removed.'))}
 
     <div class="section-head"><div class="eyebrow">Evidence<span class="sep">·</span>${evidences.length} public source${evidences.length === 1 ? '' : 's'}</div><h2>What we found publicly</h2><p class="small muted">Each claim carries its source and the date we saw it.</p></div>
     <div class="ev-list">
@@ -1692,20 +2002,20 @@ function screenShare(accountId) {
     <div class="section-head"><div class="eyebrow">Reliability story<span class="sep">·</span>${hypotheses.length} hypotheses</div><h2>Worth discussing</h2><p class="small muted">Marked as hypotheses, not facts.</p></div>
     <div class="stack">${hypotheses.map((h) => hypothesisCard(h, evidences)).join('')}</div>
 
-    <div class="section-head"><div class="eyebrow">Product map<span class="sep">·</span>${capRecs.length + intRecs.length} match${capRecs.length + intRecs.length === 1 ? '' : 'es'}</div><h2>Where incident.io could help</h2><p class="small muted">Each match links the official product page and the public evidence behind it.</p></div>
+    <div class="section-head"><div class="eyebrow">Product map<span class="sep">·</span>${capRecs.length + intRecs.length} match${capRecs.length + intRecs.length === 1 ? '' : 'es'}</div><h2>${LiveCopy.pick(account, 'Where incident.io might help', 'Where incident.io could help')}</h2><p class="small muted">Each match links the official product page and the public evidence behind it. ${escapeHtml(LiveCopy.note(account))}</p></div>
     <div class="stack">
-      ${[...capRecs, ...intRecs].map((r) => recommendationCardShare(r, DataStore.capabilities, DataStore.integrations, evidences)).join('') || renderEmpty('No matches yet', 'No deterministic match found for this account.')}
+      ${[...capRecs, ...intRecs].map((r) => recommendationCard(r, capabilities, integrations, evidences, { mode: 'share' })).join('') || renderEmpty('No matches yet', 'No deterministic match found for this account.')}
     </div>
 
-    <div class="section-head"><div class="eyebrow">Scenario<span class="sep">·</span>${scenarioSteps.length} steps</div><h2>An incident, as it would run</h2><p class="small muted">Steps not tied to public evidence are marked illustrative.</p></div>
+    <div class="section-head"><div class="eyebrow">Scenario<span class="sep">·</span>${scenarioSteps.length} steps</div><h2>An incident, as it would run</h2><p class="small muted">Steps not tied to public evidence are marked illustrative.${account.live ? ' Named systems come from public mentions, not a confirmed inventory.' : ''}</p></div>
     <ol class="rail">
       ${scenarioSteps.map((s) => scenarioStepHtml(s, signals, false, false, false)).join('')}
     </ol>
 
     <div class="section-head"><div class="eyebrow">Business case<span class="sep">·</span>3 editable levers</div><h2>Illustrative business case</h2><p class="small muted">Editable - change any assumption to match reality.</p></div>
-    ${leverHtml('downtime', roiState.assumptions, results.downtime)}
-    ${leverHtml('engineer-time', roiState.assumptions, results.engineerTime)}
-    ${leverHtml('consolidation', roiState.assumptions, results.consolidation)}
+    ${leverHtml('downtime', assumptions, results.downtime)}
+    ${leverHtml('engineer-time', assumptions, results.engineerTime)}
+    ${leverHtml('consolidation', assumptions, results.consolidation)}
     <section class="pause" aria-labelledby="roi-total-title">
       <div class="eyebrow" id="roi-total-title">Illustrative total<span class="sep">·</span>Not a guarantee</div>
       <div id="result-total">${totalResultHtml(results.total)}</div>
@@ -1716,7 +2026,7 @@ function screenShare(accountId) {
       <h4>Share this view</h4>
       <p class="small muted">Stable link - reopens this exact prospect-safe summary, including the ROI assumptions below.</p>
       <div class="row" style="flex-wrap:nowrap;">
-        <input id="share-url" type="text" readonly value="${escapeHtml(shareUrl(accountId, roiState.assumptions))}" class="text-input" style="font-size:13px; background:var(--white);" aria-label="Share link" />
+        <input id="share-url" type="text" readonly value="${escapeHtml(shareUrl(accountId, assumptions))}" class="text-input" style="font-size:13px; background:var(--white);" aria-label="Share link" />
         <button class="btn btn-primary" type="button" id="copy-share-url">Copy link</button>
       </div>
     </div>
@@ -1734,14 +2044,14 @@ function screenShare(accountId) {
   dom.view.querySelectorAll('[data-roi-key]').forEach((input) => {
     input.addEventListener('input', () => {
       const key = input.getAttribute('data-roi-key');
-      const assumption = roiState.assumptions.find((a) => a.key === key);
+      const assumption = assumptions.find((a) => a.key === key);
       if (!assumption) return;
       assumption.value = clamp(toNumber(input.value, assumption.value), assumption.min, Infinity);
       recordEvent('roi-edit', { accountId, key, value: assumption.value, mode: 'share' });
       // Refresh every lever, not just the edited one: incidents/month feeds
       // both the downtime and the engineer-time subtotals.
-      refreshRoiResultBlocks(roiState.assumptions);
-      refreshShareUrlField(accountId);
+      refreshRoiResultBlocks(assumptions);
+      refreshShareUrlField(accountId, assumptions);
     });
   });
 
@@ -1761,31 +2071,9 @@ function screenShare(accountId) {
 
 // Keep the share link in step with the assumptions currently on screen, so the
 // copied URL always reproduces the numbers the prospect is looking at.
-function refreshShareUrlField(accountId) {
+function refreshShareUrlField(accountId, assumptions) {
   const field = document.getElementById('share-url');
-  if (field) field.value = shareUrl(accountId, ensureRoiState(accountId).assumptions);
-}
-
-function recommendationCardShare(rec, capabilities, integrations, evidences) {
-  const capability = rec.capabilityId ? byId(capabilities, rec.capabilityId) : null;
-  const integration = rec.integrationId ? byId(integrations, rec.integrationId) : null;
-  const area = capability ? capability.product : `${integration.category} integration`;
-  const title = capability ? capability.name : integration.name;
-  const desc = capability ? capability.description : `Official incident.io integration (${integration.category}).`;
-  const sourceUrl = capability ? capability.sourceUrl : integration.sourceUrl;
-  const supporting = rec.evidenceIds.map((id) => byId(evidences, id)).filter(Boolean);
-  return `
-    <div class="card rec">
-      <div class="rec-head"><span class="chip">${escapeHtml(area)}</span></div>
-      <h3>${escapeHtml(title)}</h3>
-      <p class="small muted">${escapeHtml(desc)}</p>
-      <p class="rec-why">${escapeHtml(rec.reasons[0])}</p>
-      <div class="rec-foot">
-        ${sourceLink(sourceUrl, 'Official incident.io page')}
-        ${supporting.map((e) => sourceLink(e.url, `Evidence: ${e.claim.slice(0, 36)}${e.claim.length > 36 ? '…' : ''}`)).join('')}
-      </div>
-    </div>
-  `;
+  if (field) field.value = shareUrl(accountId, assumptions);
 }
 
 /* =========================================================================
@@ -1839,10 +2127,16 @@ function render() {
 
   const bundle = DataStore.getAccountBundle(route.accountId);
   if (!bundle) {
+    // A live account this browser does not hold gets a recovery offer; an
+    // unknown fixture id is a genuinely broken link.
+    if (route.accountId.startsWith('live_') || route.query.d) {
+      screenLiveRecovery(route);
+      return;
+    }
     dom.steprail.hidden = true;
     dom.modeSwitch.hidden = true;
     setActionBar('');
-    renderFailure('Prospect not found', 'That link does not match one of the three loaded fixtures.', '#/');
+    renderFailure('Prospect not found', 'That link does not match one of the loaded fixtures.', '#/');
     return;
   }
 
@@ -1854,7 +2148,10 @@ function render() {
   hydrateRoiFromRoute(route.accountId, route.query);
   checkFixtureIntegrity(route.accountId, bundle);
   loadAccountViewData(route.accountId);
-  if (route.screen === 'share') ensureShareVersion(route.accountId);
+  if (route.screen === 'share') {
+    ensureShareVersion(route.accountId);
+    prepareShareView(route.accountId);
+  }
 
   switch (route.screen) {
     case 'evidence':

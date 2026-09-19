@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto';
 const UA = 'IncidentLens/1.0 (+https://github.com/CashpointSoulja/incident-lens)';
 const TIMEOUT_MS = 6500;
 const MAX_BYTES = 700_000;
-const GENERIC_LABELS = new Set(['www', 'app', 'api', 'status', 'blog', 'careers', 'jobs']);
 
 function compact(value = '') { return String(value).replace(/\s+/g, ' ').trim(); }
 function stripHtml(html = '') {
@@ -69,8 +68,33 @@ function companyName(domain, home) {
   if (short && parts.length === 1) return short;
   return domainLabel.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
+// Evidence carries the kind of public page it came from, so downstream copy can
+// say what was actually read instead of treating every URL the same.
+export function sourceTypeForUrl(url) {
+  let parsed;
+  try { parsed = new URL(url); } catch { return 'other'; }
+  const host = parsed.hostname.toLowerCase();
+  const path = parsed.pathname.toLowerCase();
+  if (host === 'github.com' || host.endsWith('.github.com') || host.endsWith('github.io')) return 'github';
+  if (host.startsWith('status.') || host.includes('statuspage.io') || host.includes('statusgator') || /(^|\/)status(\/|$)/.test(path)) return 'status-page';
+  if (/career|jobs?(\/|$)|vacanc/.test(path) || host.includes('jobs')) return 'careers';
+  if (/engineering|infrastructure|platform/.test(path)) return 'engineering';
+  if (/blog|post|article|news/.test(path)) return 'blog';
+  if (path === '' || path === '/') return 'homepage';
+  return 'other';
+}
 function pageEvidence(accountId, page, claim, observedAt, confidence = 'high') {
-  return { id: stableId('ev', `${page.url}|${claim}`), accountId, claim, url: page.url, observedAt, confidence, kind: 'observed' };
+  return {
+    id: stableId('ev', `${page.url}|${claim}`),
+    accountId,
+    claim,
+    url: page.url,
+    sourceTitle: page.title || '',
+    sourceType: sourceTypeForUrl(page.url),
+    observedAt,
+    confidence,
+    kind: 'observed',
+  };
 }
 function findTechSignals(pages, accountId, observedAt) {
   const patterns = [
@@ -109,23 +133,42 @@ function makeHypotheses(accountId, signals) {
 function makeScenario(signals) {
   const label = (terms, fallback) => signals.find((s) => terms.some((t) => s.label.toLowerCase().includes(t)))?.label || fallback;
   const sig = (terms) => signals.find((s) => terms.some((t) => s.label.toLowerCase().includes(t)));
+  // A live signal only proves a term was mentioned publicly, so a personalized
+  // step names the system and says where that name came from; it never asserts
+  // that the company runs it.
+  const named = (terms, fallback) => {
+    const found = sig(terms);
+    return found ? `${found.label}, which their public pages mention` : fallback;
+  };
   const infra = sig(['kubernetes', 'aws', 'google cloud', 'azure', 'terraform']);
   const obs = sig(['datadog', 'grafana', 'prometheus']);
   const db = sig(['postgres', 'redis']);
   const from = (s) => s ? [s.id] : [];
+  // A step's origin is `evidence` only when it is personalized from a signal
+  // that public evidence actually supports; everything else is a hypothesis.
+  const step = (spec) => ({ ...spec, origin: spec.personalizedFrom.length ? 'evidence' : 'hypothesis' });
   return [
-    { order: 1, phase: 'alert', text: `A production service starts returning elevated errors in ${label(['kubernetes', 'aws', 'google cloud', 'azure'], 'the company’s public stack')}.`, personalizedFrom: from(infra) },
-    { order: 2, phase: 'routing', text: 'The alert is routed to the responsible on-call owner.', personalizedFrom: [] },
-    { order: 3, phase: 'investigation', text: `The responder checks ${label(['datadog', 'grafana', 'prometheus'], 'available telemetry')} to narrow the blast radius.`, personalizedFrom: from(obs) },
-    { order: 4, phase: 'response', text: `The team mitigates the affected service${db ? ` and checks ${db.label}` : ''}.`, personalizedFrom: from(db) },
-    { order: 5, phase: 'customer-update', text: 'A customer update is drafted from the confirmed incident timeline.', personalizedFrom: [] },
-    { order: 6, phase: 'postmortem', text: 'The team reviews the timeline and records follow-up actions.', personalizedFrom: [] },
+    step({ order: 1, phase: 'alert', text: `A production service starts returning elevated errors in ${named(['kubernetes', 'aws', 'google cloud', 'azure'], 'whatever runs their production services')}.`, personalizedFrom: from(infra), actor: 'system', system: label(['kubernetes', 'aws', 'google cloud', 'azure'], 'unknown - not established publicly') }),
+    step({ order: 2, phase: 'routing', text: 'The alert is routed to the responsible on-call owner.', personalizedFrom: [], actor: 'incident.io', system: 'incident.io On-call' }),
+    step({ order: 3, phase: 'investigation', text: `The responder checks ${named(['datadog', 'grafana', 'prometheus'], 'whatever telemetry they have')}, narrowing the blast radius.`, personalizedFrom: from(obs), actor: 'prospect', system: label(['datadog', 'grafana', 'prometheus'], 'unknown - not established publicly') }),
+    step({ order: 4, phase: 'response', text: `The team mitigates the affected service${db ? ` and checks ${db.label}, also mentioned on their public pages` : ''}.`, personalizedFrom: from(db), actor: 'prospect', system: db ? db.label : 'the affected service' }),
+    step({ order: 5, phase: 'customer-update', text: 'A customer update is drafted from the confirmed incident timeline.', personalizedFrom: [], actor: 'prospect', system: 'incident.io Status Pages' }),
+    step({ order: 6, phase: 'postmortem', text: 'The team reviews the timeline and records follow-up actions.', personalizedFrom: [], actor: 'prospect', system: 'incident.io Response' }),
   ];
 }
-export async function researchDomain(input, { fetchImpl = fetch } = {}) {
-  const domain = normalizeDomain(input);
-  const observedAt = new Date().toISOString().slice(0, 10);
-  const accountId = stableId('live', domain);
+/* Capture / transform boundary ---------------------------------------------
+ * capturePages() is the only impure step: it is the single place that touches
+ * the network. It returns the raw captured pages plus the capture timestamp
+ * that was handed to it.
+ * buildBundle() is pure: (captured pages + capturedAt) -> bundle. It never
+ * reads the clock and never fetches, so replaying a stored capture with its
+ * original capturedAt always reproduces byte-identical output. Every internal
+ * step (findTechSignals, makeHypotheses, makeScenario) already takes its pages
+ * and its timestamp as arguments for the same reason.
+ * researchDomain() just wires the two together, so external behaviour is
+ * unchanged.
+ * ------------------------------------------------------------------------- */
+async function capturePages(domain, { fetchImpl = fetch, capturedAt } = {}) {
   const home = await fetchPage(`https://${domain}/`, fetchImpl) || await fetchPage(`http://${domain}/`, fetchImpl);
   if (!home) throw new Error('The company website could not be read. Try its root domain or use a preloaded prospect.');
   const candidates = [
@@ -134,6 +177,13 @@ export async function researchDomain(input, { fetchImpl = fetch } = {}) {
   ];
   const settled = await Promise.all(candidates.map((url) => fetchPage(url, fetchImpl)));
   const pages = [home, ...settled.filter(Boolean)].filter((page, i, all) => all.findIndex((x) => x.url === page.url) === i);
+  return { domain, pages, pagesChecked: candidates.length + 1, capturedAt };
+}
+
+export function buildBundle({ domain, pages, pagesChecked, capturedAt }) {
+  const observedAt = String(capturedAt).slice(0, 10);
+  const accountId = stableId('live', domain);
+  const home = pages[0];
   const name = companyName(domain, home);
   const account = { id: accountId, domain, name, industry: null, createdAt: `${observedAt}T00:00:00Z`, alreadyCustomer: false, live: true };
   const evidences = [pageEvidence(accountId, home, `${name}'s public website was read successfully${home.description ? `: “${home.description}”` : '.'}`, observedAt)];
@@ -150,5 +200,13 @@ export async function researchDomain(input, { fetchImpl = fetch } = {}) {
   const signals = discovered.signals;
   if (statusPage) signals.unshift({ id: stableId('sig', `${accountId}|Public status page`), accountId, label: 'Public status page', evidenceIds: [evidences.find((e) => e.url === statusPage.url).id], strength: 5 });
   const hypotheses = makeHypotheses(accountId, signals);
-  return { account, evidences, signals, hypotheses, scenarioSteps: makeScenario(signals), research: { live: true, pagesChecked: candidates.length + 1, pagesRead: pages.length, observedAt } };
+  return { account, evidences, signals, hypotheses, scenarioSteps: makeScenario(signals), research: { live: true, pagesChecked, pagesRead: pages.length, observedAt, capturedAt } };
+}
+
+// `now` is the explicit capture timestamp (Date or ISO string); it is read
+// once here and then only ever passed through, never re-read downstream.
+export async function researchDomain(input, { fetchImpl = fetch, now = new Date() } = {}) {
+  const domain = normalizeDomain(input);
+  const capturedAt = (now instanceof Date ? now : new Date(now)).toISOString();
+  return buildBundle(await capturePages(domain, { fetchImpl, capturedAt }));
 }
