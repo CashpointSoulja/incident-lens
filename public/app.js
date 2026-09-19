@@ -621,11 +621,37 @@ const dom = {
 };
 
 let toastTimer = null;
+let toastHideTimer = null;
 function showToast(message) {
+  clearTimeout(toastTimer);
+  clearTimeout(toastHideTimer);
+  dom.toast.classList.remove('is-leaving');
   dom.toast.textContent = message;
   dom.toast.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { dom.toast.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => {
+    // Let the exit animation run before the element is removed from layout.
+    dom.toast.classList.add('is-leaving');
+    toastHideTimer = setTimeout(() => {
+      dom.toast.hidden = true;
+      dom.toast.classList.remove('is-leaving');
+    }, 240);
+  }, 2600);
+}
+
+// Brief success state on a button after an action lands (copy link, copy
+// payload): the label swaps to a check + confirmation, then restores. Orange
+// means "action available"; charcoal here means "done".
+function flashButtonSuccess(btn, label) {
+  if (!btn || btn.dataset.flashing) return;
+  const original = btn.innerHTML;
+  btn.dataset.flashing = '1';
+  btn.classList.add('is-success');
+  btn.innerHTML = `<span class="check" aria-hidden="true">✓</span>${escapeHtml(label)}`;
+  setTimeout(() => {
+    btn.classList.remove('is-success');
+    btn.innerHTML = original;
+    delete btn.dataset.flashing;
+  }, 1800);
 }
 
 function setActionBar(html) {
@@ -636,6 +662,9 @@ function setActionBar(html) {
   }
   dom.actionbar.hidden = false;
   dom.actionbar.innerHTML = html;
+  // Slide the bar in only with a fresh screen (set by renderView, which every
+  // screen calls first); in-screen re-renders keep it still.
+  dom.actionbar.classList.toggle('bar-enter', viewIsFresh);
 }
 
 // One shared step rail across the account-scoped AE screens. Hidden on the
@@ -654,16 +683,29 @@ function renderStepRail(accountId, activeKey) {
     return;
   }
   const activeIdx = AE_STEPS.findIndex((s) => s.key === activeKey);
-  const items = AE_STEPS.map((s, i) => {
-    const isCurrent = s.key === activeKey;
-    const isDone = i < activeIdx;
-    return `<li>
-      <a href="#/a/${accountId}/${s.key}" ${isCurrent ? 'aria-current="step"' : ''} class="${isDone ? 'done' : ''}">
-        <span class="n">${s.n}</span>${escapeHtml(s.label)}
-      </a>
-    </li>`;
-  }).join('');
-  dom.steprail.innerHTML = `<div class="wrap"><ol>${items}</ol></div>`;
+  // Patch the existing pills when the rail already belongs to this account, so
+  // the current/done state change can transition instead of being rebuilt.
+  const existing = Array.from(dom.steprail.querySelectorAll('li > a'));
+  const sameRail = existing.length === AE_STEPS.length
+    && existing[0].getAttribute('href') === `#/a/${accountId}/${AE_STEPS[0].key}`;
+  if (sameRail) {
+    existing.forEach((a, i) => {
+      if (AE_STEPS[i].key === activeKey) a.setAttribute('aria-current', 'step');
+      else a.removeAttribute('aria-current');
+      a.classList.toggle('done', i < activeIdx);
+    });
+  } else {
+    const items = AE_STEPS.map((s, i) => {
+      const isCurrent = s.key === activeKey;
+      const isDone = i < activeIdx;
+      return `<li>
+        <a href="#/a/${accountId}/${s.key}" ${isCurrent ? 'aria-current="step"' : ''} class="${isDone ? 'done' : ''}">
+          <span class="n">${s.n}</span>${escapeHtml(s.label)}
+        </a>
+      </li>`;
+    }).join('');
+    dom.steprail.innerHTML = `<div class="wrap"><ol>${items}</ol></div>`;
+  }
   dom.steprail.hidden = false;
 }
 
@@ -674,6 +716,12 @@ function renderModeSwitch(accountId) {
     return;
   }
   dom.modeSwitch.hidden = false;
+  const buttons = dom.modeSwitch.querySelectorAll('[data-mode-switch]');
+  if (buttons.length === 2) {
+    // Patch in place so the pressed state slides rather than re-mounts.
+    buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.getAttribute('data-mode-switch') === state.mode)));
+    return;
+  }
   dom.modeSwitch.innerHTML = `
     <button type="button" data-mode-switch="internal" aria-pressed="${state.mode === 'internal'}">AE view</button>
     <button type="button" data-mode-switch="share" aria-pressed="${state.mode === 'share'}">Share</button>
@@ -814,14 +862,26 @@ function recordFeedback(accountId, briefId, useful) {
 }
 
 let lastRouteKey = null;
+// True while the current render is a genuine screen change (route or
+// loading -> ready). Entrance motion runs only then; in-screen re-renders
+// (scenario step, ROI reset) swap content with no decorative motion.
+let viewIsFresh = false;
+// Set by a screen right before render() when an in-route state change deserves
+// a full entrance anyway (the "Build the reliability story" reveal).
+let forceFreshRender = false;
+const prefersReducedMotion = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 function renderView(html) {
-  dom.view.innerHTML = html;
+  const key = `${state.status === 'loading' ? 'loading:' : ''}${location.hash || '#/'}`;
+  viewIsFresh = forceFreshRender || key !== lastRouteKey;
+  forceFreshRender = false;
+  dom.view.innerHTML = `<div class="screen${viewIsFresh ? ' screen-enter' : ''}">${html}</div>`;
   // Focus for keyboard/skip-link users without letting the browser yank the
   // page so the title hides behind the sticky rail. Scroll to top only when
   // the route actually changed; in-screen state changes keep their position.
   dom.view.focus({ preventScroll: true });
-  const key = location.hash || '#/';
-  if (key !== lastRouteKey) window.scrollTo(0, 0);
+  // Instant, not smooth: the content already changed, so animating the scroll
+  // would drag the new screen upwards. Smooth scrolling is for in-page moves.
+  if (viewIsFresh) window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   lastRouteKey = key;
 }
 
@@ -964,20 +1024,20 @@ function screenAccountPicker() {
   }).join('');
 
   renderView(`
-    <div class="section-head">
-      <div class="eyebrow">Live research<span class="sep">·</span>Public evidence only</div>
-      <h1>Research any company live</h1>
-      <p class="lede">Enter a domain. Incident Lens checks public reliability signals now, cites every observed claim, and labels every inference.</p>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="eyebrow eyebrow-live">Live research<span class="sep">·</span>Public evidence only</div>
+      <h1 class="hero-title" id="hero-title">Research any company live</h1>
+      <p class="lede hero-lede">Enter a domain. Incident Lens checks public reliability signals now, cites every observed claim, and labels every inference.</p>
       <form id="domain-form" class="card domain-form live-domain-form" role="search">
         <label class="small" for="domain-input" style="font-weight:600;">Company domain</label>
         <div class="row" style="flex-wrap:nowrap;">
           <input id="domain-input" name="domain" type="text" inputmode="url" autocomplete="off" placeholder="e.g. incident.io" class="text-input" required />
           <button class="btn btn-primary" id="domain-submit" type="submit">Research live</button>
         </div>
-        <p class="tiny muted" id="domain-status" role="status" aria-live="polite"></p>
+        <div class="tiny muted" id="domain-status" role="status" aria-live="polite">Reads the company site, status page, engineering blog and careers pages. Public pages only, every claim linked.</div>
       </form>
-      <div class="section-head"><div class="eyebrow">Recent examples<span class="sep">·</span>${DataStore.accounts.filter((b) => !b.account.live).length} preloaded</div></div>
-    </div>
+    </section>
+    <div class="section-head picker-examples"><div class="eyebrow">Recent examples<span class="sep">·</span>${DataStore.accounts.filter((b) => !b.account.live).length} preloaded</div></div>
     <div class="stack">
       ${cards}
     </div>
@@ -998,9 +1058,29 @@ function screenAccountPicker() {
     const raw = input.value.trim();
     if (!raw) return;
     submit.disabled = true;
-    submit.textContent = 'Researching…';
+    submit.classList.add('is-working');
+    submit.setAttribute('aria-busy', 'true');
+    submit.innerHTML = '<span class="spinner" aria-hidden="true"></span>Researching…';
     input.disabled = true;
-    status.textContent = 'Checking the company site, status, engineering, careers and open-source pages. Usually 10–30 seconds.';
+    status.classList.remove('is-error');
+    // Live progress: the set of public routes being checked, with a moving
+    // highlight for activity. No checkmarks - nothing is claimed as read until
+    // the ledger renders with its dated, linked evidence.
+    const routes = ['Company site', 'Status page', 'Engineering blog', 'Careers', 'Open source'];
+    status.innerHTML = `
+      <div class="research-progress">
+        <div class="progress-bar" aria-hidden="true"><span></span></div>
+        <div class="progress-routes" aria-hidden="true">
+          <span class="tiny muted">Checking</span>
+          ${routes.map((r, i) => `<span class="chip${i === 0 ? ' is-now' : ''}">${escapeHtml(r)}</span>`).join('')}
+        </div>
+        <p class="tiny muted">Reading public pages now. Usually 10–30 seconds; anything we cannot read is left out, not guessed.</p>
+      </div>`;
+    let routeIdx = 0;
+    const cycle = setInterval(() => {
+      routeIdx = (routeIdx + 1) % routes.length;
+      status.querySelectorAll('.progress-routes .chip').forEach((c, j) => c.classList.toggle('is-now', j === routeIdx));
+    }, 1800);
     recordEvent('domain-lookup-started', { domain: raw });
     try {
       const response = await fetch(`/api/research?domain=${encodeURIComponent(raw)}`, { cache: 'no-store' });
@@ -1008,11 +1088,16 @@ function screenAccountPicker() {
       if (!response.ok) throw new Error(payload.error || `Research failed (${response.status}).`);
       const bundle = DataStore.addLiveBundle(payload);
       recordEvent('domain-lookup-completed', { domain: bundle.account.domain, accountId: bundle.account.id, sources: bundle.evidences.length });
+      clearInterval(cycle);
       location.hash = `#/a/${bundle.account.id}/evidence`;
     } catch (error) {
+      clearInterval(cycle);
       status.textContent = error && error.message ? error.message : 'Live research failed. Try the root company domain.';
+      status.classList.add('is-error');
       recordEvent('domain-lookup-failed', { domain: raw, error: status.textContent });
       submit.disabled = false;
+      submit.classList.remove('is-working');
+      submit.removeAttribute('aria-busy');
       submit.textContent = 'Research live';
       input.disabled = false;
       input.focus();
@@ -1150,10 +1235,33 @@ function screenBrief(accountId) {
       </div>
     `);
     document.getElementById('build-story-btn').addEventListener('click', () => {
-      state.builtBrief[accountId] = true;
-      saveVersion(accountId, 'internal');
-      showToast('Reliability story generated from the evidence ledger.');
-      render();
+      const btn = document.getElementById('build-story-btn');
+      if (!btn || btn.dataset.working) return;
+      const finish = () => {
+        state.builtBrief[accountId] = true;
+        saveVersion(accountId, 'internal');
+        forceFreshRender = true; // same route, but the story arriving deserves a full entrance
+        render();
+        showToast('Reliability story generated from the evidence ledger.');
+      };
+      if (prefersReducedMotion()) { finish(); return; }
+      // Staged reveal (~1s): name what is actually being used, in order. The
+      // result is deterministic and instant; this only makes the step legible.
+      const stages = [`Reading ${signals.length} signals`, 'Drafting three hypotheses', 'Matching capabilities by rule'];
+      btn.dataset.working = '1';
+      btn.classList.add('is-working');
+      btn.setAttribute('aria-busy', 'true');
+      btn.innerHTML = `<span class="spinner" aria-hidden="true"></span><span class="btn-stage">${escapeHtml(stages[0])}</span>`;
+      const ghost = dom.view.querySelector('.empty');
+      if (ghost) ghost.classList.add('is-building');
+      stages.slice(1).forEach((label, i) => setTimeout(() => {
+        const fresh = document.createElement('span');
+        fresh.className = 'btn-stage';
+        fresh.textContent = label;
+        const current = btn.querySelector('.btn-stage');
+        if (current) current.replaceWith(fresh);
+      }, 330 * (i + 1)));
+      setTimeout(finish, 330 * stages.length + 60);
     });
     return;
   }
@@ -1261,6 +1369,7 @@ function screenBrief(accountId) {
       recordEvent('sf-payload-copied', { accountId });
       try {
         await navigator.clipboard.writeText(text);
+        flashButtonSuccess(copyPayloadBtn, 'Copied');
         showToast('Salesforce-ready payload copied (no real CRM call made).');
       } catch {
         showToast('Could not access clipboard - select the payload text manually.');
@@ -1368,10 +1477,16 @@ const LEVER_META = {
   consolidation: { title: 'Tool consolidation', hint: 'Retiring point tools removes their standalone licence cost.' },
 };
 
+// Money amounts carry their raw value so an in-place refresh can count from the
+// previous figure to the new one instead of snapping.
+function amount(n) {
+  return `<span class="amt" data-value="${Math.round(Number.isFinite(n) ? n : 0)}">${fmtMoney(n)}</span>`;
+}
+
 function leverResultHtml(result) {
   return `
-    <div class="num">${fmtMoney(result.monthly)}<span>/mo</span></div>
-    <div class="small muted">${fmtMoney(result.annual)}/yr</div>
+    <div class="num">${amount(result.monthly)}<span>/mo</span></div>
+    <div class="small muted">${amount(result.annual)}/yr</div>
     <div class="formula">${escapeHtml(result.formula)}</div>
   `;
 }
@@ -1379,10 +1494,32 @@ function leverResultHtml(result) {
 // The one deep-burgundy pause in the flow: the conclusion, in white serif, with its formula beside it.
 function totalResultHtml(total) {
   return `
-    <div class="pause-num serif">${fmtMoney(total.monthly)}<span class="per">/mo</span></div>
-    <div class="pause-yr">${fmtMoney(total.annual)} a year, illustrative</div>
+    <div class="pause-num serif">${amount(total.monthly)}<span class="per">/mo</span></div>
+    <div class="pause-yr">${amount(total.annual)} a year, illustrative</div>
     <div class="formula">downtime + engineer time + tool consolidation, added monthly</div>
   `;
+}
+
+// Count a money figure from its previous value to the new one (~450ms, ease-out).
+// The final frame always writes the exact deterministic value; reduced-motion
+// users get that value immediately.
+const amountTweens = new WeakMap(); // el -> requestAnimationFrame id
+function tweenAmount(el, from, to) {
+  if (amountTweens.has(el)) cancelAnimationFrame(amountTweens.get(el));
+  if (!Number.isFinite(from) || from === to || prefersReducedMotion()) {
+    el.textContent = fmtMoney(to);
+    return;
+  }
+  const start = performance.now();
+  const duration = 450;
+  const tick = (now) => {
+    const t = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - t, 3);
+    el.textContent = fmtMoney(from + (to - from) * eased);
+    if (t < 1) amountTweens.set(el, requestAnimationFrame(tick));
+    else amountTweens.delete(el);
+  };
+  amountTweens.set(el, requestAnimationFrame(tick));
 }
 
 // Patch every result block in place from the current assumptions. Shared by
@@ -1392,7 +1529,13 @@ function refreshRoiResultBlocks(assumptions) {
   const res = Roi.calculate(Roi.assumptionsAsMap(assumptions));
   const set = (id, html) => {
     const el = document.getElementById(id);
-    if (el) el.innerHTML = html;
+    if (!el) return;
+    const previous = Array.from(el.querySelectorAll('.amt')).map((s) => toNumber(s.getAttribute('data-value'), NaN));
+    el.innerHTML = html;
+    el.querySelectorAll('.amt').forEach((s, i) => {
+      s.classList.add('is-live');
+      tweenAmount(s, previous[i], toNumber(s.getAttribute('data-value'), 0));
+    });
   };
   set('result-downtime', leverResultHtml(res.downtime));
   set('result-engineer-time', leverResultHtml(res.engineerTime));
@@ -1607,6 +1750,7 @@ function screenShare(accountId) {
     input.select();
     try {
       await navigator.clipboard.writeText(input.value);
+      flashButtonSuccess(document.getElementById('copy-share-url'), 'Copied');
       showToast('Share link copied.');
     } catch {
       showToast('Could not access clipboard - link is selected, copy manually.');
