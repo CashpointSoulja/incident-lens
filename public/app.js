@@ -140,6 +140,7 @@ const Models = {
       industry: a.industry || null,
       createdAt: a.createdAt || nowIso(),
       alreadyCustomer: !!a.alreadyCustomer,
+      live: !!a.live,
     };
   },
   evidence(e) {
@@ -332,13 +333,7 @@ const DataStore = {
       const fixtures = Array.isArray(fixturesJson.fixtures) ? fixturesJson.fixtures : [];
       if (!fixtures.length) throw new Error('fixtures.json contained no fixtures');
 
-      DataStore.accounts = fixtures.map((fx) => ({
-        account: Models.account(fx.account),
-        evidences: (fx.evidences || []).map(Models.evidence),
-        signals: (fx.signals || []).map(Models.signal),
-        hypotheses: (fx.hypotheses || []).map(Models.hypothesis),
-        scenarioSteps: (fx.scenarioSteps || []).map(Models.scenarioStep).sort((a, b) => a.order - b.order),
-      }));
+      DataStore.accounts = fixtures.map((fx) => DataStore.normalizeBundle(fx));
       DataStore.capabilities = (kbJson.capabilities || []).map(Models.capability);
       DataStore.integrations = (kbJson.integrations || []).map(Models.integration);
 
@@ -348,6 +343,25 @@ const DataStore = {
       DataStore.error = err && err.message ? err.message : String(err);
     }
     return DataStore.status;
+  },
+
+  normalizeBundle(fx) {
+    return {
+      account: Models.account(fx.account),
+      evidences: (fx.evidences || []).map(Models.evidence),
+      signals: (fx.signals || []).map(Models.signal),
+      hypotheses: (fx.hypotheses || []).map(Models.hypothesis),
+      scenarioSteps: (fx.scenarioSteps || []).map(Models.scenarioStep).sort((a, b) => a.order - b.order),
+      research: fx.research || null,
+    };
+  },
+
+  addLiveBundle(raw) {
+    const bundle = DataStore.normalizeBundle(raw);
+    const index = DataStore.accounts.findIndex((a) => a.account.id === bundle.account.id);
+    if (index >= 0) DataStore.accounts[index] = bundle;
+    else DataStore.accounts.unshift(bundle);
+    return bundle;
   },
 
   getAccountBundle(accountId) {
@@ -885,9 +899,9 @@ function customerChip(alreadyCustomer) {
 function aboutBuildNote() {
   return `
     <aside class="about-build" aria-labelledby="about-build-title">
-      <div class="eyebrow" id="about-build-title">About this build</div>
-      <p class="hand">Two of the three prospects we first picked, Linear and Render, turned out to already be incident.io customers. Public evidence said so - the same check this product runs on every account - so both were swapped for clean prospects.</p>
-      <p class="tiny muted">Audition build - not affiliated with incident.io. Fixtures are precomputed from public pages; nothing here is a live call.</p>
+      <div class="eyebrow" id="about-build-title">How live mode works</div>
+      <p class="hand">Enter a company domain. Incident Lens reads public pages now, separates observed evidence from hypotheses, then carries the result through the same brief, scenario, ROI and share flow.</p>
+      <p class="tiny muted">Smallest honest v1: public company site, status page, engineering/blog pages and careers routes. Some sites block automated reading; those lookups fail instead of filling gaps with guesses.</p>
     </aside>
   `;
 }
@@ -951,26 +965,23 @@ function screenAccountPicker() {
 
   renderView(`
     <div class="section-head">
-      <div class="eyebrow">Prospects<span class="sep">·</span>${DataStore.accounts.length} preloaded</div>
-      <h1>Who are we walking into?</h1>
-      <p class="lede">Three prospects, researched from public pages and ready in under a second. Every claim is observed with a source or clearly marked as a hypothesis.</p>
+      <div class="eyebrow">Live research<span class="sep">·</span>Public evidence only</div>
+      <h1>Research any company live</h1>
+      <p class="lede">Enter a domain. Incident Lens checks public reliability signals now, cites every observed claim, and labels every inference.</p>
+      <form id="domain-form" class="card domain-form live-domain-form" role="search">
+        <label class="small" for="domain-input" style="font-weight:600;">Company domain</label>
+        <div class="row" style="flex-wrap:nowrap;">
+          <input id="domain-input" name="domain" type="text" inputmode="url" autocomplete="off" placeholder="e.g. incident.io" class="text-input" required />
+          <button class="btn btn-primary" id="domain-submit" type="submit">Research live</button>
+        </div>
+        <p class="tiny muted" id="domain-status" role="status" aria-live="polite"></p>
+      </form>
+      <div class="section-head"><div class="eyebrow">Recent examples<span class="sep">·</span>${DataStore.accounts.filter((b) => !b.account.live).length} preloaded</div></div>
     </div>
     <div class="stack">
       ${cards}
     </div>
     ${aboutBuildNote()}
-    <div class="section-head">
-      <div class="eyebrow">Optional<span class="sep">·</span>Fails closed</div>
-      <h3 class="h-quiet">Try a live domain</h3>
-      <p class="small muted">Live scraping isn't part of this audition build. Enter a domain to see how the app stops instead of inventing data.</p>
-    </div>
-    <form id="domain-form" class="card domain-form" role="search">
-      <label class="small" for="domain-input" style="font-weight:600;">Prospect domain</label>
-      <div class="row" style="flex-wrap:nowrap;">
-        <input id="domain-input" name="domain" type="text" inputmode="url" autocomplete="off" placeholder="e.g. acme.com" class="text-input" />
-        <button class="btn btn-dark" type="submit">Look up</button>
-      </div>
-    </form>
   `);
   setActionBar('');
 
@@ -979,16 +990,32 @@ function screenAccountPicker() {
   });
 
   const form = document.getElementById('domain-form');
-  form.addEventListener('submit', (ev) => {
+  form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const raw = document.getElementById('domain-input').value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const input = document.getElementById('domain-input');
+    const submit = document.getElementById('domain-submit');
+    const status = document.getElementById('domain-status');
+    const raw = input.value.trim();
     if (!raw) return;
-    const match = DataStore.accounts.find((b) => b.account.domain.toLowerCase() === raw || b.account.domain.toLowerCase().includes(raw));
-    recordEvent('domain-lookup', { domain: raw, matched: !!match });
-    if (match) {
-      location.hash = `#/a/${match.account.id}/evidence`;
-    } else {
-      showToast(`No live analysis in this audition build - "${raw}" isn't one of the three fixtures. Pick one above instead.`);
+    submit.disabled = true;
+    submit.textContent = 'Researching…';
+    input.disabled = true;
+    status.textContent = 'Checking the company site, status, engineering, careers and open-source pages. Usually 10–30 seconds.';
+    recordEvent('domain-lookup-started', { domain: raw });
+    try {
+      const response = await fetch(`/api/research?domain=${encodeURIComponent(raw)}`, { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || `Research failed (${response.status}).`);
+      const bundle = DataStore.addLiveBundle(payload);
+      recordEvent('domain-lookup-completed', { domain: bundle.account.domain, accountId: bundle.account.id, sources: bundle.evidences.length });
+      location.hash = `#/a/${bundle.account.id}/evidence`;
+    } catch (error) {
+      status.textContent = error && error.message ? error.message : 'Live research failed. Try the root company domain.';
+      recordEvent('domain-lookup-failed', { domain: raw, error: status.textContent });
+      submit.disabled = false;
+      submit.textContent = 'Research live';
+      input.disabled = false;
+      input.focus();
     }
   });
 }
@@ -1036,7 +1063,7 @@ function screenEvidence(accountId) {
     : renderEmpty('No evidence yet', 'This account has no evidence cards loaded, so no brief can be generated - unsupported claims are blocked, not invented.');
 
   renderView(`
-    ${accountHeader(bundle.account, `Every claim below is public, dated and linked. Nothing is presented as fact without a source.`)}
+    ${accountHeader(bundle.account, `Every claim below is public, dated and linked. Nothing is presented as fact without a source.${bundle.account.live && bundle.research ? ` Live lookup read ${bundle.research.pagesRead} of ${bundle.research.pagesChecked} routes.` : ''}`)}
     <div class="section-head">
       <div class="eyebrow">Evidence<span class="sep">·</span>${counts.total} source${counts.total === 1 ? '' : 's'}<span class="sep">·</span>${counts.observed} observed, ${counts.inferred} inferred</div>
     </div>
@@ -1109,7 +1136,7 @@ function screenBrief(accountId) {
       </div>
       <div class="empty" style="margin-top:14px;">
         <h3>Nothing written yet - on purpose</h3>
-        <p class="small">Tap <strong>Build the reliability story</strong> and these ${signals.length} signals become three hypotheses, discovery questions and a product map. All from cached evidence; no network call, nothing invented.</p>
+        <p class="small">Tap <strong>Build the reliability story</strong> and these ${signals.length} signals become three hypotheses, discovery questions and a product map. All from the evidence ledger; nothing invented.</p>
         <div class="skeleton-preview" aria-hidden="true">
           <div class="skeleton skeleton-line" style="width:56%"></div>
           <div class="skeleton skeleton-line" style="width:84%"></div>
@@ -1125,7 +1152,7 @@ function screenBrief(accountId) {
     document.getElementById('build-story-btn').addEventListener('click', () => {
       state.builtBrief[accountId] = true;
       saveVersion(accountId, 'internal');
-      showToast('Reliability story generated from cached evidence - no network call made.');
+      showToast('Reliability story generated from the evidence ledger.');
       render();
     });
     return;

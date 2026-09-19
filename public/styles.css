@@ -401,3 +401,15 @@ a:focus-visible, button:focus-visible, input:focus-visible, [tabindex]:focus-vis
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
+
+
+/* Live research entry point */
+.live-domain-form { margin: 18px 0 6px; border-color: var(--charcoal); box-shadow: 0 8px 28px rgba(22,22,24,.06); }
+.live-domain-form .text-input { flex: 1 1 auto; min-width: 0; }
+.live-domain-form .btn { flex: none; }
+.live-domain-form [role="status"] { margin: 10px 0 0; min-height: 18px; }
+.live-domain-form button:disabled { opacity: .68; cursor: wait; }
+@media (max-width: 390px) {
+  .live-domain-form .row { align-items: stretch; flex-direction: column; }
+  .live-domain-form .btn { width: 100%; }
+}

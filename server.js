@@ -1,15 +1,23 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
+import { researchDomain } from './live-research.js';
 
 const ROOT = new URL('.', import.meta.url).pathname;
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
+function sendJson(res, status, body) { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); }
 
 export default async function handler(req, res) {
   try {
-    let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+    const requestUrl = new URL(req.url, 'http://x');
+    if (requestUrl.pathname === '/api/research') {
+      if (req.method !== 'GET') return sendJson(res, 405, { error: 'Method not allowed.' });
+      const domain = requestUrl.searchParams.get('domain') || '';
+      try { return sendJson(res, 200, await researchDomain(domain)); }
+      catch (error) { return sendJson(res, 422, { error: error?.message || 'Live research failed.' }); }
+    }
+    let p = decodeURIComponent(requestUrl.pathname);
     if (p === '/') p = '/index.html';
-    // Fixtures and the product knowledge base live in /data (one source of truth, also read by scripts).
     const base = p.startsWith('/data/') ? ROOT : join(ROOT, 'public');
     const file = normalize(join(base, p));
     if (!file.startsWith(join(ROOT, 'public')) && !file.startsWith(join(ROOT, 'data'))) { res.writeHead(403); return res.end(); }
