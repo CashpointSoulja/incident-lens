@@ -112,8 +112,10 @@
             "id_399ce1cc"
           ],
           "status": "hypothesis",
-          "confidence": "medium",
-          "kind": "inferred"
+          "confidence": 0.7,
+          "signalIds": [
+            "id_fe6307ad"
+          ]
         },
         {
           "id": "id_cc25e969",
@@ -123,8 +125,10 @@
             "id_bcad5e90"
           ],
           "status": "hypothesis",
-          "confidence": "medium",
-          "kind": "inferred"
+          "confidence": 0.56,
+          "signalIds": [
+            "id_2a65e69f"
+          ]
         },
         {
           "id": "id_3ca7f75d",
@@ -135,8 +139,11 @@
             "id_f0e9cea9"
           ],
           "status": "hypothesis",
-          "confidence": "medium",
-          "kind": "inferred"
+          "confidence": 0.63,
+          "signalIds": [
+            "id_b47d98bb",
+            "id_2a9e2046"
+          ]
         }
       ],
       "scenarioSteps": [
@@ -292,7 +299,11 @@
           "evidenceIds": [
             "id_525a3a4f"
           ],
-          "status": "hypothesis"
+          "status": "hypothesis",
+          "signalIds": [
+            "id_1174df13"
+          ],
+          "confidence": 0.56
         },
         {
           "id": "id_efa131ed",
@@ -302,7 +313,12 @@
             "id_d00ffa4f",
             "id_e0f784c2"
           ],
-          "status": "hypothesis"
+          "status": "hypothesis",
+          "signalIds": [
+            "id_b60d3ee3",
+            "id_9979a959"
+          ],
+          "confidence": 0.7
         },
         {
           "id": "id_7a876df2",
@@ -311,7 +327,11 @@
           "evidenceIds": [
             "id_bb22acab"
           ],
-          "status": "hypothesis"
+          "status": "hypothesis",
+          "signalIds": [
+            "id_ad0086d5"
+          ],
+          "confidence": 0.7
         }
       ],
       "scenarioSteps": [
@@ -467,8 +487,11 @@
             "id_f4c95f72"
           ],
           "status": "hypothesis",
-          "confidence": "medium",
-          "kind": "inferred"
+          "confidence": 0.63,
+          "signalIds": [
+            "id_df2e88fc",
+            "id_f8d0702e"
+          ]
         },
         {
           "id": "id_281f55a5",
@@ -479,8 +502,10 @@
             "id_f4c95f72"
           ],
           "status": "hypothesis",
-          "confidence": "medium",
-          "kind": "inferred"
+          "confidence": 0.56,
+          "signalIds": [
+            "id_f8d0702e"
+          ]
         },
         {
           "id": "id_84e99b9b",
@@ -491,8 +516,11 @@
             "id_f49597c7"
           ],
           "status": "hypothesis",
-          "confidence": "medium",
-          "kind": "inferred"
+          "confidence": 0.7,
+          "signalIds": [
+            "id_0f99fa41",
+            "id_df2e88fc"
+          ]
         }
       ],
       "scenarioSteps": [

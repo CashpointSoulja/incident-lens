@@ -42,6 +42,20 @@ function uid(prefix) {
   return `${prefix}_${Date.now().toString(36)}${__uidCounter.toString(36)}`;
 }
 
+// Deterministic content-addressed id: same stable inputs -> same id, always.
+// Used for every object produced by the deterministic core (recommendations,
+// ROI assumptions) so identical inputs produce identical objects - no clock,
+// no counter, no randomness.
+function hashId(prefix, ...parts) {
+  const input = parts.map((p) => (Array.isArray(p) ? p.join(',') : String(p == null ? '' : p))).join('|');
+  let h = 0x811c9dc5; // FNV-1a 32-bit
+  for (let i = 0; i < input.length; i += 1) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${prefix}_${h.toString(36).padStart(7, '0')}`;
+}
+
 function escapeHtml(str) {
   return String(str == null ? '' : str).replace(/[&<>"']/g, (ch) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -154,6 +168,11 @@ const Models = {
       accountId: h.accountId,
       statement: h.statement,
       evidenceIds: h.evidenceIds || [],
+      // Ids of the signals this hypothesis draws on, plus an explicit 0-1
+      // confidence: a hypothesis must always show what it is built on and how
+      // strongly it is held (PRD section 5, "Hypothesis").
+      signalIds: h.signalIds || [],
+      confidence: clamp(toNumber(h.confidence, 0.5), 0, 1),
       status: 'hypothesis',
     };
   },
@@ -176,7 +195,7 @@ const Models = {
   },
   recommendation({ id, accountId, capabilityId, integrationId, ruleId, reasons, evidenceIds }) {
     return {
-      id: id || uid('rec'),
+      id: id || hashId('rec', accountId, ruleId, capabilityId || '', integrationId || '', (evidenceIds || []).slice().sort()),
       accountId,
       capabilityId: capabilityId || null,
       integrationId: integrationId || null,
@@ -193,9 +212,10 @@ const Models = {
       personalizedFrom: s.personalizedFrom || [],
     };
   },
-  roiAssumption({ id, key, label, value, unit, editable, note, min, step, lever }) {
+  roiAssumption({ id, accountId, key, label, value, unit, editable, note, min, step, lever }) {
     return {
-      id: id || uid('roi'),
+      id: id || hashId('roi', accountId, key, lever),
+      accountId: accountId || null,
       key,
       label,
       value,
@@ -207,14 +227,19 @@ const Models = {
       lever, // downtime|engineer-time|consolidation
     };
   },
-  briefVersion({ id, accountId, version, mode, createdAt }) {
+  briefVersion({ id, accountId, version, mode, createdAt, assumptions }) {
     return {
       id: id || uid('brief'),
       accountId,
       version,
       mode, // internal|share
-      matcherVersion: MATCHER_VERSION,
+      matcherVersion: MATCHER_VERSION, // rules version this brief was generated with
       roiVersion: ROI_VERSION,
+      // Immutable snapshot of the ROI assumptions as they stood when saved, so
+      // a stored version never re-renders with numbers it was not saved with.
+      roiAssumptions: Object.freeze((assumptions || []).map((a) => Object.freeze({
+        id: a.id, key: a.key, label: a.label, value: a.value, unit: a.unit, lever: a.lever,
+      }))),
       createdAt: createdAt || nowIso(),
     };
   },
@@ -480,33 +505,37 @@ const Roi = {
   // guarantee). RoiAssumption entities, one per lever input.
   baselineAssumptions(accountBundle) {
     const industry = (accountBundle.account.industry || '').toLowerCase();
+    const accountId = accountBundle.account.id;
     const scale = industry.includes('bank') ? 1.6 : industry.includes('cloud') ? 1.3 : 1;
+    // Every assumption is scoped to the account so its id is content-derived
+    // (account + key + lever) rather than clock/counter based.
+    const assumption = (spec) => Models.roiAssumption({ ...spec, accountId });
     return [
-      Models.roiAssumption({
+      assumption({
         key: 'incidentsPerMonth', label: 'Incidents per month', value: Math.round(4 * scale), unit: 'incidents',
         note: 'Illustrative starting point based on account size/industry - replace with the prospect\'s own number.', min: 0, step: 1, lever: 'downtime',
       }),
-      Models.roiAssumption({
+      assumption({
         key: 'minutesReducedPerIncident', label: 'Downtime reduced per incident', value: Math.round(18 * scale), unit: 'minutes',
         note: 'Faster routing/investigation is assumed to shave this many minutes off mean time to resolution.', min: 0, step: 1, lever: 'downtime',
       }),
-      Models.roiAssumption({
+      assumption({
         key: 'costPerMinuteDowntime', label: 'Cost of downtime', value: industry.includes('bank') ? 400 : 150, unit: '$ / minute',
         note: 'Benchmark placeholder - swap for the prospect\'s own revenue-at-risk figure.', min: 0, step: 10, lever: 'downtime',
       }),
-      Models.roiAssumption({
+      assumption({
         key: 'hoursReclaimedPerIncident', label: 'Engineer hours reclaimed per incident', value: 2.5, unit: 'hours',
         note: 'Time saved on manual paging, timeline-building and status drafting per incident.', min: 0, step: 0.5, lever: 'engineer-time',
       }),
-      Models.roiAssumption({
+      assumption({
         key: 'engineerHourlyRate', label: 'Fully loaded engineer rate', value: 90, unit: '$ / hour',
         note: 'Illustrative fully-loaded engineering cost - not a real payroll figure.', min: 0, step: 5, lever: 'engineer-time',
       }),
-      Models.roiAssumption({
+      assumption({
         key: 'toolsConsolidated', label: 'Point tools consolidated', value: accountBundle.account.alreadyCustomer ? 1 : 2, unit: 'tools',
         note: 'Paging/status/timeline tools this account could retire by consolidating onto incident.io.', min: 0, step: 1, lever: 'consolidation',
       }),
-      Models.roiAssumption({
+      assumption({
         key: 'costPerTool', label: 'Average cost per tool', value: 220, unit: '$ / month',
         note: 'Illustrative average monthly seat/licence cost for a point tool being replaced.', min: 0, step: 10, lever: 'consolidation',
       }),
@@ -560,7 +589,11 @@ const state = {
   mode: 'internal', // internal|share
   route: { name: 'picker', accountId: null },
   roiByAccount: {}, // accountId -> { assumptions: RoiAssumption[] }
+  roiHydrated: {}, // accountId -> true once the URL's ROI assumptions were applied
   builtBrief: {}, // accountId -> true once "Build the reliability story" has been tapped
+  // Persisted data read once per route by the controller and handed to the
+  // render functions, so no render function reads/writes localStorage itself.
+  viewData: {}, // accountId -> { internalBrief, shareBrief, recentEvents }
 };
 
 const dom = {
@@ -640,9 +673,10 @@ dom.modeSwitch.addEventListener('click', (ev) => {
   if (target === state.mode) return;
   const accountId = state.route.accountId;
   if (!accountId) return;
-  EventTrail.record('mode-switch', { accountId, from: state.mode, to: target });
+  recordEvent('mode-switch', { accountId, from: state.mode, to: target });
   if (target === 'share') {
-    location.hash = `#/a/${accountId}/share`;
+    // Carry the current assumptions into the share URL so the link is shareable as-is.
+    location.hash = shareHash(accountId, ensureRoiState(accountId).assumptions);
   } else {
     location.hash = `#/a/${accountId}/brief`;
   }
@@ -654,6 +688,115 @@ function ensureRoiState(accountId) {
     state.roiByAccount[accountId] = { assumptions: Roi.baselineAssumptions(bundle) };
   }
   return state.roiByAccount[accountId];
+}
+
+/* ---------- share-link state (ROI assumptions travel in the URL hash) ------
+ * A share link must reopen the same numbers the AE was looking at, so the
+ * current assumptions are encoded compactly into the hash as
+ * `#/a/<id>/share?roi=key:value;key:value` and applied on load. Missing or
+ * unparseable params fall back to the fixture baseline.
+ * ------------------------------------------------------------------------- */
+
+const RoiUrl = {
+  encode(assumptions) {
+    return assumptions.map((a) => `${a.key}:${a.value}`).join(';');
+  },
+  decode(raw) {
+    const out = {};
+    String(raw || '').split(';').forEach((pair) => {
+      const [key, value] = pair.split(':');
+      const n = toNumber(value, null);
+      if (key && n != null) out[key] = n;
+    });
+    return out;
+  },
+};
+
+function shareHash(accountId, assumptions) {
+  return `#/a/${accountId}/share?roi=${encodeURIComponent(RoiUrl.encode(assumptions))}`;
+}
+
+function shareUrl(accountId, assumptions) {
+  return `${location.origin}${location.pathname}${location.search}${shareHash(accountId, assumptions)}`;
+}
+
+// Apply the URL's assumptions once per account, so later re-renders of the same
+// link do not stomp on edits made in the share view.
+function hydrateRoiFromRoute(accountId, query) {
+  const roiState = ensureRoiState(accountId);
+  if (state.roiHydrated[accountId]) return roiState;
+  state.roiHydrated[accountId] = true;
+  const overrides = RoiUrl.decode(query && query.roi);
+  roiState.assumptions.forEach((a) => {
+    if (Object.prototype.hasOwnProperty.call(overrides, a.key)) {
+      a.value = clamp(overrides[a.key], a.min, Infinity);
+    }
+  });
+  return roiState;
+}
+
+/* ---------- controller actions ----------------------------------------------
+ * These are the only functions allowed to touch the storage helpers
+ * (EventTrail / FeedbackStore / BriefVersionStore). They are called from event
+ * handlers and from the router before a screen renders; render functions read
+ * the results from `state.viewData` instead of the stores.
+ * ------------------------------------------------------------------------- */
+
+function recordEvent(type, detail) {
+  return EventTrail.record(type, detail);
+}
+
+function loadAccountViewData(accountId) {
+  const snapshot = {
+    internalBrief: BriefVersionStore.latestFor(accountId, 'internal'),
+    shareBrief: BriefVersionStore.latestFor(accountId, 'share'),
+    recentEvents: EventTrail.forAccount(accountId).slice(-6).reverse(),
+  };
+  state.viewData[accountId] = snapshot;
+  return snapshot;
+}
+
+function accountViewData(accountId) {
+  return state.viewData[accountId] || { internalBrief: null, shareBrief: null, recentEvents: [] };
+}
+
+// Freeze a brief version together with the ROI assumptions it was saved with.
+function saveVersion(accountId, mode) {
+  const brief = Models.briefVersion({
+    accountId,
+    version: BriefVersionStore.nextVersionNumber(accountId, mode),
+    mode,
+    assumptions: ensureRoiState(accountId).assumptions,
+  });
+  BriefVersionStore.add(brief);
+  recordEvent('brief-built', { accountId, version: brief.version, mode });
+  const snapshot = loadAccountViewData(accountId);
+  // Keep the in-memory snapshot correct even when localStorage is unavailable.
+  if (mode === 'share') snapshot.shareBrief = snapshot.shareBrief || brief;
+  else snapshot.internalBrief = snapshot.internalBrief || brief;
+  return brief;
+}
+
+// Share mode implies the reliability story exists; save a share version once.
+function ensureShareVersion(accountId) {
+  state.builtBrief[accountId] = true;
+  const existing = BriefVersionStore.latestFor(accountId, 'share');
+  if (existing) return existing;
+  return saveVersion(accountId, 'share');
+}
+
+// Fixture sanity check: the PRD promises three hypotheses per account, so a
+// mismatch is recorded as an event by the controller (never from a render).
+function checkFixtureIntegrity(accountId, bundle) {
+  if (bundle.hypotheses.length !== 3) {
+    recordEvent('hypothesis-count-warning', { accountId, count: bundle.hypotheses.length });
+  }
+}
+
+function recordFeedback(accountId, briefId, useful) {
+  const fb = FeedbackStore.add(Models.feedbackEvent({ briefId, useful }));
+  recordEvent('feedback', { accountId, useful, briefId });
+  return fb;
 }
 
 let lastRouteKey = null;
@@ -841,7 +984,7 @@ function screenAccountPicker() {
     const raw = document.getElementById('domain-input').value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
     if (!raw) return;
     const match = DataStore.accounts.find((b) => b.account.domain.toLowerCase() === raw || b.account.domain.toLowerCase().includes(raw));
-    EventTrail.record('domain-lookup', { domain: raw, matched: !!match });
+    recordEvent('domain-lookup', { domain: raw, matched: !!match });
     if (match) {
       location.hash = `#/a/${match.account.id}/evidence`;
     } else {
@@ -981,25 +1124,20 @@ function screenBrief(accountId) {
     `);
     document.getElementById('build-story-btn').addEventListener('click', () => {
       state.builtBrief[accountId] = true;
-      const version = BriefVersionStore.nextVersionNumber(accountId, 'internal');
-      const brief = Models.briefVersion({ accountId, version, mode: 'internal' });
-      BriefVersionStore.add(brief);
-      EventTrail.record('brief-built', { accountId, version, mode: 'internal' });
+      saveVersion(accountId, 'internal');
       showToast('Reliability story generated from cached evidence - no network call made.');
       render();
     });
     return;
   }
 
-  if (hypotheses.length !== 3) {
-    EventTrail.record('hypothesis-count-warning', { accountId, count: hypotheses.length });
-  }
-
   const recs = Matcher.buildRecommendations(bundle, DataStore.capabilities, DataStore.integrations);
   const capRecs = recs.filter((r) => r.capabilityId);
   const intRecs = recs.filter((r) => r.integrationId);
   const questions = Matcher.deriveDiscoveryQuestions(hypotheses);
-  const brief = BriefVersionStore.latestFor(accountId, 'internal');
+  // Persisted data was read by the controller (loadAccountViewData) before this
+  // render ran; render functions never touch the stores themselves.
+  const { internalBrief: brief, recentEvents } = accountViewData(accountId);
 
   renderView(`
     ${accountHeader(account, 'Fact kept apart from interpretation: hypotheses are marked inferred, and every recommendation shows its rule and evidence.')}
@@ -1068,7 +1206,7 @@ function screenBrief(accountId) {
 
     <div class="section-head"><div class="eyebrow">Internal<span class="sep">·</span>This session</div><h3 class="h-quiet">Event trail</h3></div>
     <ul class="trail">
-      ${EventTrail.forAccount(accountId).slice(-6).reverse().map((e) => `<li><time>${fmtDate(e.at)}</time><span>${escapeHtml(e.type)}</span></li>`).join('') || '<li class="muted">No events recorded yet this session.</li>'}
+      ${recentEvents.map((e) => `<li><time>${fmtDate(e.at)}</time><span>${escapeHtml(e.type)}</span></li>`).join('') || '<li class="muted">No events recorded yet this session.</li>'}
     </ul>
   `);
 
@@ -1081,9 +1219,7 @@ function screenBrief(accountId) {
   dom.view.querySelectorAll('[data-feedback]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const useful = btn.getAttribute('data-feedback') === 'useful';
-      const fb = Models.feedbackEvent({ briefId: brief ? brief.id : uid('brief'), useful });
-      FeedbackStore.add(fb);
-      EventTrail.record('feedback', { accountId, useful });
+      recordFeedback(accountId, brief ? brief.id : null, useful);
       dom.view.querySelectorAll('[data-feedback]').forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
       document.getElementById('feedback-ack').textContent = useful
         ? 'Thanks - recorded as useful.'
@@ -1095,7 +1231,7 @@ function screenBrief(accountId) {
   if (copyPayloadBtn) {
     copyPayloadBtn.addEventListener('click', async () => {
       const text = document.getElementById('sf-payload').textContent;
-      EventTrail.record('sf-payload-copied', { accountId });
+      recordEvent('sf-payload-copied', { accountId });
       try {
         await navigator.clipboard.writeText(text);
         showToast('Salesforce-ready payload copied (no real CRM call made).');
@@ -1222,6 +1358,22 @@ function totalResultHtml(total) {
   `;
 }
 
+// Patch every result block in place from the current assumptions. Shared by
+// the AE ROI screen and the share view: one input (incidents/month) feeds more
+// than one lever, so refreshing only the edited lever leaves a stale subtotal.
+function refreshRoiResultBlocks(assumptions) {
+  const res = Roi.calculate(Roi.assumptionsAsMap(assumptions));
+  const set = (id, html) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = html;
+  };
+  set('result-downtime', leverResultHtml(res.downtime));
+  set('result-engineer-time', leverResultHtml(res.engineerTime));
+  set('result-consolidation', leverResultHtml(res.consolidation));
+  set('result-total', totalResultHtml(res.total));
+  return res;
+}
+
 function leverHtml(leverKey, assumptions, result) {
   const meta = LEVER_META[leverKey];
   const fields = assumptions.filter((a) => a.lever === leverKey);
@@ -1275,36 +1427,30 @@ function screenRoi(accountId) {
 
   setActionBar(`
     <div class="wrap">
-      <a class="btn btn-primary btn-block" href="#/a/${accountId}/share">Switch to share mode</a>
+      <a class="btn btn-primary btn-block" id="to-share-link" href="${escapeHtml(shareHash(accountId, roiState.assumptions))}">Switch to share mode</a>
     </div>
   `);
 
-  // Editing an input recomputes and patches only the affected result blocks,
-  // so focus/caret position survives - the "changing one input updates the
+  // Editing an input recomputes and patches the result blocks in place, so
+  // focus/caret position survives - the "changing one input updates the
   // result immediately" requirement without fighting the browser's cursor.
-  function refreshResults() {
-    const vals = Roi.assumptionsAsMap(roiState.assumptions);
-    const res = Roi.calculate(vals);
-    document.getElementById('result-downtime').innerHTML = leverResultHtml(res.downtime);
-    document.getElementById('result-engineer-time').innerHTML = leverResultHtml(res.engineerTime);
-    document.getElementById('result-consolidation').innerHTML = leverResultHtml(res.consolidation);
-    document.getElementById('result-total').innerHTML = totalResultHtml(res.total);
-  }
-
   dom.view.querySelectorAll('[data-roi-key]').forEach((input) => {
     input.addEventListener('input', () => {
       const key = input.getAttribute('data-roi-key');
       const assumption = roiState.assumptions.find((a) => a.key === key);
       if (!assumption) return;
       assumption.value = clamp(toNumber(input.value, assumption.value), assumption.min, Infinity);
-      EventTrail.record('roi-edit', { accountId, key, value: assumption.value });
-      refreshResults();
+      recordEvent('roi-edit', { accountId, key, value: assumption.value });
+      refreshRoiResultBlocks(roiState.assumptions);
+      // Keep the share hand-off link carrying the assumptions as edited.
+      const toShare = document.getElementById('to-share-link');
+      if (toShare) toShare.setAttribute('href', shareHash(accountId, roiState.assumptions));
     });
   });
 
   document.getElementById('roi-reset').addEventListener('click', () => {
     state.roiByAccount[accountId] = { assumptions: Roi.baselineAssumptions(bundle) };
-    EventTrail.record('roi-reset', { accountId });
+    recordEvent('roi-reset', { accountId });
     showToast('ROI assumptions reset to the fixture baseline.');
     screenRoi(accountId);
   });
@@ -1361,13 +1507,9 @@ function screenShare(accountId) {
   const values = Roi.assumptionsAsMap(roiState.assumptions);
   const results = Roi.calculate(values);
 
-  if (!state.builtBrief[accountId]) state.builtBrief[accountId] = true; // sharing implies the story exists
-  let brief = BriefVersionStore.latestFor(accountId, 'share');
-  if (!brief) {
-    brief = Models.briefVersion({ accountId, version: BriefVersionStore.nextVersionNumber(accountId, 'share'), mode: 'share' });
-    BriefVersionStore.add(brief);
-    EventTrail.record('brief-built', { accountId, version: brief.version, mode: 'share' });
-  }
+  // The share version is saved by the controller (ensureShareVersion) before
+  // this render runs; this function only reads it.
+  const brief = accountViewData(accountId).shareBrief;
 
   renderView(`
     ${accountHeader(account, 'A prospect-safe summary: sources and uncertainty stay visible, internal notes and sales-only language are removed.')}
@@ -1402,15 +1544,15 @@ function screenShare(accountId) {
 
     <div class="card card-quiet" style="margin-top:16px;">
       <h4>Share this view</h4>
-      <p class="small muted">Stable link - reopens this exact prospect-safe summary.</p>
+      <p class="small muted">Stable link - reopens this exact prospect-safe summary, including the ROI assumptions below.</p>
       <div class="row" style="flex-wrap:nowrap;">
-        <input id="share-url" type="text" readonly value="${escapeHtml(location.href)}" class="text-input" style="font-size:13px; background:var(--white);" aria-label="Share link" />
+        <input id="share-url" type="text" readonly value="${escapeHtml(shareUrl(accountId, roiState.assumptions))}" class="text-input" style="font-size:13px; background:var(--white);" aria-label="Share link" />
         <button class="btn btn-primary" type="button" id="copy-share-url">Copy link</button>
       </div>
     </div>
 
     ${aboutBuildNote()}
-    <p class="tiny muted" style="margin-top:14px;">Brief v${brief.version} (share) · generated ${fmtDate(brief.createdAt)} · Incident Lens is an audition build, not affiliated with incident.io.</p>
+    <p class="tiny muted" style="margin-top:14px;">Brief v${brief ? brief.version : 1} (share)${brief ? ` · generated ${fmtDate(brief.createdAt)}` : ''} · Incident Lens is an audition build, not affiliated with incident.io.</p>
   `);
 
   setActionBar(`
@@ -1425,11 +1567,11 @@ function screenShare(accountId) {
       const assumption = roiState.assumptions.find((a) => a.key === key);
       if (!assumption) return;
       assumption.value = clamp(toNumber(input.value, assumption.value), assumption.min, Infinity);
-      EventTrail.record('roi-edit', { accountId, key, value: assumption.value, mode: 'share' });
-      const vals = Roi.assumptionsAsMap(roiState.assumptions);
-      const res = Roi.calculate(vals);
-      document.getElementById(`result-${assumption.lever}`).innerHTML = leverResultHtml(res[assumption.lever === 'engineer-time' ? 'engineerTime' : assumption.lever]);
-      document.getElementById('result-total').innerHTML = totalResultHtml(res.total);
+      recordEvent('roi-edit', { accountId, key, value: assumption.value, mode: 'share' });
+      // Refresh every lever, not just the edited one: incidents/month feeds
+      // both the downtime and the engineer-time subtotals.
+      refreshRoiResultBlocks(roiState.assumptions);
+      refreshShareUrlField(accountId);
     });
   });
 
@@ -1442,8 +1584,15 @@ function screenShare(accountId) {
     } catch {
       showToast('Could not access clipboard - link is selected, copy manually.');
     }
-    EventTrail.record('share-link-copied', { accountId });
+    recordEvent('share-link-copied', { accountId });
   });
+}
+
+// Keep the share link in step with the assumptions currently on screen, so the
+// copied URL always reproduces the numbers the prospect is looking at.
+function refreshShareUrlField(accountId) {
+  const field = document.getElementById('share-url');
+  if (field) field.value = shareUrl(accountId, ensureRoiState(accountId).assumptions);
 }
 
 function recommendationCardShare(rec, capabilities, integrations, evidences) {
@@ -1478,14 +1627,21 @@ function recommendationCardShare(rec, capabilities, integrations, evidences) {
  * ========================================================================= */
 
 function parseRoute(hash) {
-  const clean = (hash || '').replace(/^#/, '');
-  const parts = clean.split('/').filter(Boolean); // e.g. ['a', '<id>', 'evidence']
-  if (parts.length === 0) return { name: 'picker', accountId: null, screen: null };
+  const [path, search] = (hash || '').replace(/^#/, '').split('?');
+  const query = {};
+  if (search) {
+    search.split('&').forEach((pair) => {
+      const [k, v] = pair.split('=');
+      if (k) query[decodeURIComponent(k)] = decodeURIComponent(v || '');
+    });
+  }
+  const parts = path.split('/').filter(Boolean); // e.g. ['a', '<id>', 'evidence']
+  if (parts.length === 0) return { name: 'picker', accountId: null, screen: null, query };
   if (parts[0] === 'a' && parts[1]) {
     const screen = parts[2] || 'evidence';
-    return { name: 'account', accountId: parts[1], screen };
+    return { name: 'account', accountId: parts[1], screen, query };
   }
-  return { name: 'picker', accountId: null, screen: null };
+  return { name: 'picker', accountId: null, screen: null, query };
 }
 
 function render() {
@@ -1520,6 +1676,14 @@ function render() {
   }
 
   state.mode = route.screen === 'share' ? 'share' : 'internal';
+
+  // Controller work happens here, before any screen renders: hydrate the ROI
+  // assumptions from the link, read the persisted brief/event data once, and
+  // (for share links) make sure a share version exists.
+  hydrateRoiFromRoute(route.accountId, route.query);
+  checkFixtureIntegrity(route.accountId, bundle);
+  loadAccountViewData(route.accountId);
+  if (route.screen === 'share') ensureShareVersion(route.accountId);
 
   switch (route.screen) {
     case 'evidence':
