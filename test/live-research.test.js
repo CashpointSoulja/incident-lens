@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeDomain, isStatusPageUrl, sourceTypeForUrl, fetchPage, buildBundle, researchDomain } from '../live-research.js';
+import { normalizeDomain, isStatusPageUrl, sourceTypeForUrl, fetchPage, buildBundle, researchDomain, isPrivateIp } from '../live-research.js';
 
 // No test in this file touches the network or DNS: `fetchImpl` and `lookupImpl`
 // are both injected, so the guards can be exercised deterministically.
@@ -127,6 +127,79 @@ test('every generated scenario step carries the capability it proposes', async (
   const bundle = await researchDomain('acme.com', { fetchImpl, lookupImpl: publicLookup, now: '2026-01-05T10:00:00.000Z' });
   assert.equal(bundle.scenarioSteps.length, 6);
   for (const step of bundle.scenarioSteps) assert.match(step.capabilityId, /^cap-/);
+});
+
+test('the response cap is spent in bytes received, not decoded characters', async () => {
+  // 700k CJK characters = 2.1MB on the wire. A character-based cap accepted all
+  // of it; a byte-based cap must stop at 700kB.
+  const multibyte = `<title>大きい</title>${'漢'.repeat(700_000)}`;
+  const raw = Buffer.from(multibyte, 'utf-8');
+  assert.ok(raw.length > 2_000_000, `fixture must be ~2.1MB, was ${raw.length}`);
+  const fetchImpl = async () => new Response(raw, { status: 200, headers: { 'content-type': 'text/html' } });
+  const page = await fetchPage('https://acme.com/', fetchImpl, publicLookup);
+  assert.ok(page, 'a large page is still read, just truncated');
+  assert.ok(Buffer.byteLength(page.body, 'utf-8') <= 700_000, `body must be capped in bytes, was ${Buffer.byteLength(page.body, 'utf-8')}`);
+  assert.ok(page.body.length < 300_000, `only ~233k multibyte chars fit in 700kB, got ${page.body.length} chars`);
+  assert.match(page.title, /大きい/, 'the accepted bytes are decoded correctly');
+});
+
+test('non-public addresses are rejected across both IP families', async () => {
+  const nonPublic = [
+    '10.0.0.5', '172.16.0.1', '172.31.255.255', '192.168.1.1', '127.0.0.1', '169.254.169.254', '0.0.0.0', '100.64.0.1',
+    '::1', '0:0:0:0:0:0:0:1', '::', 'fe80::1', 'fe80::1%eth0', 'febf::abcd', 'fc00::1', 'fd12:3456::1',
+    '::ffff:127.0.0.1', '::ffff:169.254.169.254', '::ffff:10.0.0.1', '::ffff:7f00:1', '::127.0.0.1',
+  ];
+  for (const address of nonPublic) assert.equal(isPrivateIp(address), true, `${address} must not count as public`);
+  for (const address of ['93.184.216.34', '8.8.8.8', '100.63.255.255', '100.128.0.1', '2606:2800:220:1:248:1893:25c8:1946', '::ffff:93.184.216.34']) {
+    assert.equal(isPrivateIp(address), false, `${address} is a public address`);
+  }
+
+  // Each family, exercised end to end through the injected resolver: a redirect
+  // that lands on such an address is never requested.
+  for (const address of ['::1', 'fe80::1', '::ffff:127.0.0.1', 'fc00::1', '100.64.0.1', '::']) {
+    const seen = [];
+    const fetchImpl = async (url) => {
+      seen.push(url);
+      if (url === 'https://acme.com/') return redirectResponse('https://internal.example/admin');
+      return htmlResponse('<title>internal</title>secrets');
+    };
+    const lookupImpl = async (host) => [{ address: host === 'internal.example' ? address : '93.184.216.34' }];
+    assert.equal(await fetchPage('https://acme.com/', fetchImpl, lookupImpl), null, `redirect to ${address} must not be followed`);
+    assert.deepEqual(seen, ['https://acme.com/'], `${address} must never be requested`);
+  }
+});
+
+test('domain association is exact or a true subdomain, never a substring', () => {
+  const lookalike = buildBundle({
+    domain: 'acme.com',
+    pages: [
+      page('https://acme.com/', 'Acme builds widgets.', 'Acme'),
+      page('https://github.com/acme', 'Open source from notacme.com. We run Kubernetes and Datadog at scale.', 'acme'),
+    ],
+    pagesChecked: 9,
+    capturedAt: '2026-01-05T10:00:00.000Z',
+  });
+  assert.deepEqual(lookalike.evidences.map((e) => e.url), ['https://acme.com/'], 'a page naming notacme.com is not associated with acme.com');
+  assert.deepEqual(lookalike.signals, [], 'no Kubernetes/Datadog evidence may be manufactured from a lookalike domain');
+  assert.equal(lookalike.evidences.some((e) => /GitHub presence/.test(e.claim)), false, 'no "linked" GitHub claim from a lookalike domain');
+
+  const related = buildBundle({
+    domain: 'acme.com',
+    pages: [
+      page('https://acme.com/', 'Acme builds widgets.', 'Acme'),
+      page('https://status.acme.com/', 'All systems operational. No incident today.', 'Acme Status'),
+      page('https://github.com/acme', 'Open source from the team at status.acme.com. We run Kubernetes.', 'acme'),
+    ],
+    pagesChecked: 9,
+    capturedAt: '2026-01-05T10:00:00.000Z',
+  });
+  assert.ok(related.evidences.some((e) => e.url === 'https://status.acme.com/'), 'a true subdomain is associated');
+  assert.ok(related.evidences.some((e) => /GitHub presence/.test(e.claim)), 'a GitHub page naming a subdomain of the target is associated');
+  assert.ok(related.signals.some((s) => s.label === 'Kubernetes'));
+
+  assert.equal(isStatusPageUrl('https://status.notacme.com/', 'acme.com'), false);
+  assert.equal(sourceTypeForUrl('https://notgithub.io/acme'), 'other', 'a lookalike vendor host is not a GitHub source');
+  assert.equal(sourceTypeForUrl('https://acme.github.io/'), 'github');
 });
 
 test('replaying the same capture reproduces byte-identical output, ids included', () => {

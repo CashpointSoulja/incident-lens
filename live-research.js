@@ -28,9 +28,47 @@ function metaDescription(html = '') {
   return '';
 }
 function stableId(prefix, value) { return `${prefix}_${createHash('sha256').update(value).digest('hex').slice(0, 10)}`; }
-function isPrivateIp(ip) {
-  return /^(127\.|10\.|0\.|169\.254\.|192\.168\.|::1$|fc|fd)/i.test(ip)
-    || /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+/* Any address that is not a public unicast destination, across both families.
+ * IPv6 matters as much as IPv4 here: a redirect that resolves to ::1, to a
+ * link-local fe80:: address, or to an IPv4-mapped form such as ::ffff:127.0.0.1
+ * reaches exactly the same internal services as 127.0.0.1 does, so mapped and
+ * compatible forms are decoded and re-checked as IPv4. */
+function isPrivateIpv4(ip) {
+  return /^(?:127\.|10\.|0\.|169\.254\.|192\.168\.)/.test(ip)
+    || /^172\.(?:1[6-9]|2\d|3[01])\./.test(ip)
+    || /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip);
+}
+export function isPrivateIp(address) {
+  const ip = String(address).trim().toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
+  if (!ip) return true;
+  if (!ip.includes(':')) return isPrivateIpv4(ip);
+  // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible (::a.b.c.d) forms.
+  const embedded = ip.match(/^(?:::ffff:0*:?|::)((?:\d{1,3}\.){3}\d{1,3})$/);
+  if (embedded) return isPrivateIpv4(embedded[1]);
+  // The same mapped addresses written as hex (::ffff:7f00:1).
+  const hexMapped = ip.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hexMapped) {
+    const n = (parseInt(hexMapped[1], 16) * 65536) + parseInt(hexMapped[2], 16);
+    return isPrivateIpv4([n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.'));
+  }
+  if (/^(?:0:){7}0$/.test(ip) || ip === '::' || ip === '::1' || /^(?:0:){7}1$/.test(ip)) return true;
+  if (/^fe[89ab][0-9a-f]:/.test(ip)) return true; // fe80::/10 link-local
+  if (/^f[cd][0-9a-f]{2}:/.test(ip)) return true; // fc00::/7 unique-local
+  return false;
+}
+/* Host/domain matching is exact or on a real subdomain boundary - never a
+ * substring. "notacme.com" is a different company from "acme.com"; only
+ * "acme.com" itself and hosts ending in ".acme.com" belong to it. Every place
+ * that ties a page to the target domain routes through these two helpers. */
+function normalizeHost(value) {
+  return String(value || '').trim().toLowerCase().replace(/\.$/, '').replace(/^www\./, '');
+}
+function hostMatchesDomain(host, domain) {
+  if (!host || !domain) return false;
+  return host === domain || host.endsWith(`.${domain}`);
+}
+function hostOf(url) {
+  try { return normalizeHost(new URL(url).hostname); } catch { return ''; }
 }
 export function normalizeDomain(input) {
   const raw = compact(input).toLowerCase();
@@ -62,26 +100,40 @@ async function assertFetchableUrl(url, lookupImpl) {
   return parsed;
 }
 
-// Read at most MAX_BYTES off the wire and then stop pulling, so an endless or
-// hostile response is never buffered in full before being truncated. Falls back
-// to text() only when the response exposes no readable stream (test doubles).
+// Read at most MAX_BYTES *off the wire* and then stop pulling, so an endless or
+// hostile response is never buffered in full before being truncated. The budget
+// is spent in bytes received, never in decoded characters: multibyte text (CJK,
+// emoji) costs 3-4 bytes per character, so a character-based cap would have let
+// a 700kB budget accept megabytes. Raw chunks are accumulated and measured
+// before decoding, the response is cancelled the moment the byte total reaches
+// the cap, and only the accepted bytes are decoded. Falls back to text() only
+// when the response exposes no readable stream (test doubles).
+// `stream: true` without a final flush drops a trailing partial sequence left by
+// cutting at an exact byte boundary, so the decoded text never grows past the
+// cap with a replacement character.
+function decodeCapped(bytes) {
+  return new TextDecoder('utf-8').decode(bytes.subarray(0, MAX_BYTES), { stream: true });
+}
 async function readCapped(res) {
   const body = res.body;
-  if (!body || typeof body.getReader !== 'function') return String(await res.text()).slice(0, MAX_BYTES);
+  if (!body || typeof body.getReader !== 'function') return decodeCapped(Buffer.from(String(await res.text()), 'utf-8'));
   const reader = body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let out = '';
+  const chunks = [];
+  let received = 0;
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      out += decoder.decode(value, { stream: true });
-      if (out.length >= MAX_BYTES) { out = out.slice(0, MAX_BYTES); break; }
+      const chunk = value instanceof Uint8Array ? value : Buffer.from(String(value), 'utf-8');
+      const remaining = MAX_BYTES - received;
+      if (chunk.length >= remaining) { chunks.push(chunk.subarray(0, remaining)); received = MAX_BYTES; break; }
+      chunks.push(chunk);
+      received += chunk.length;
     }
   } finally {
     try { await reader.cancel(); } catch { /* already closed */ }
   }
-  return out;
+  return decodeCapped(Buffer.concat(chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.length)), received));
 }
 
 export async function fetchPage(url, fetchImpl = fetch, lookupImpl = lookup) {
@@ -129,11 +181,10 @@ function companyName(domain, home) {
 export function isStatusPageUrl(url, domain) {
   let parsed;
   try { parsed = new URL(url); } catch { return false; }
-  const host = parsed.hostname.toLowerCase().replace(/^www\./, '').replace(/\.$/, '');
+  const host = normalizeHost(parsed.hostname);
   const path = parsed.pathname.toLowerCase().replace(/\/+$/, '');
-  const base = domain ? String(domain).toLowerCase().replace(/^www\./, '') : '';
-  if (host === 'statuspage.io' || host.endsWith('.statuspage.io')) return true;
-  if (host === 'statusgator.com' || host.endsWith('.statusgator.com')) return true;
+  const base = domain ? normalizeHost(domain) : '';
+  if (hostMatchesDomain(host, 'statuspage.io') || hostMatchesDomain(host, 'statusgator.com')) return true;
   if (base ? host === `status.${base}` : /^status\./.test(host)) return true;
   if (path === '/status' && (base ? host === base : true)) return true;
   return false;
@@ -144,9 +195,9 @@ export function isStatusPageUrl(url, domain) {
 export function sourceTypeForUrl(url) {
   let parsed;
   try { parsed = new URL(url); } catch { return 'other'; }
-  const host = parsed.hostname.toLowerCase();
+  const host = normalizeHost(parsed.hostname);
   const path = parsed.pathname.toLowerCase();
-  if (host === 'github.com' || host.endsWith('.github.com') || host.endsWith('github.io')) return 'github';
+  if (hostMatchesDomain(host, 'github.com') || hostMatchesDomain(host, 'github.io')) return 'github';
   if (isStatusPageUrl(url)) return 'status-page';
   if (/career|jobs?(\/|$)|vacanc/.test(path) || host.includes('jobs')) return 'careers';
   if (/engineering|infrastructure|platform/.test(path)) return 'engineering';
@@ -175,11 +226,13 @@ function pageEvidence(accountId, page, claim, observedAt, confidence = 'high') {
  * the presence card: an unrelated GitHub profile must never supply "observed"
  * technology evidence for this account. */
 function isAttributable(page, domain) {
-  let host;
-  try { host = new URL(page.url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return false; }
-  const base = String(domain).toLowerCase();
-  if (host === base || host.endsWith(`.${base}`)) return true;
-  return String(page.text || '').toLowerCase().includes(base);
+  const base = normalizeHost(domain);
+  if (hostMatchesDomain(hostOf(page.url), base)) return true;
+  // A substring search would accept "notacme.com" as a mention of "acme.com",
+  // so every host-shaped token in the text is extracted and matched on the same
+  // exact/subdomain boundary as a URL host.
+  const mentions = String(page.text || '').toLowerCase().match(/(?:[a-z0-9-]+\.)+[a-z]{2,63}/g) || [];
+  return mentions.some((candidate) => hostMatchesDomain(normalizeHost(candidate), base));
 }
 function findTechSignals(pages, accountId, observedAt) {
   const patterns = [
@@ -288,7 +341,10 @@ export function buildBundle({ domain, pages, pagesChecked, capturedAt }) {
   if (careersPage) evidences.push(pageEvidence(accountId, careersPage, `A public careers or jobs page was found${careersPage.title ? `: “${careersPage.title}”` : '.'}`, observedAt));
   const engineeringPage = owned.find((p) => /engineering|blog/i.test(new URL(p.url).pathname) && /engineer|technical|developer|infrastructure/i.test(p.text.slice(0, 7000)));
   if (engineeringPage) evidences.push(pageEvidence(accountId, engineeringPage, `A public engineering or technical page was found${engineeringPage.title ? `: “${engineeringPage.title}”` : '.'}`, observedAt));
-  const githubPage = owned.find((p) => new URL(p.url).hostname.toLowerCase().replace(/^www\./, '') === 'github.com');
+  // `owned` already required exact-host or true-subdomain association, so a
+  // GitHub page only earns the "linked to <domain>" claim when the page itself
+  // names this domain (not a lookalike such as notacme.com).
+  const githubPage = owned.find((p) => hostMatchesDomain(hostOf(p.url), 'github.com'));
   if (githubPage) evidences.push(pageEvidence(accountId, githubPage, `A public GitHub presence linked to ${domain} was found${githubPage.title ? `: “${githubPage.title}”` : '.'}`, observedAt));
   const discovered = findTechSignals(owned, accountId, observedAt);
   evidences.push(...discovered.evidence);
