@@ -159,128 +159,263 @@
     {
       "id": "int-slack",
       "name": "Slack",
-      "category": "Issue Tracking",
-      "sourceUrl": "https://incident.io/incident-response-slack"
+      "category": "Chat and Collaboration",
+      "sourceUrl": "https://incident.io/incident-response-slack",
+      "signalPatterns": [
+        "slack"
+      ],
+      "capabilityIds": [
+        "cap-resp-1",
+        "cap-nexus-1"
+      ]
     },
     {
       "id": "int-teams",
       "name": "Microsoft Teams",
-      "category": "Issue Tracking",
-      "sourceUrl": "https://incident.io/incident-response-microsoft-teams"
+      "category": "Chat and Collaboration",
+      "sourceUrl": "https://incident.io/incident-response-microsoft-teams",
+      "signalPatterns": [
+        "microsoft teams",
+        "ms teams"
+      ],
+      "capabilityIds": [
+        "cap-resp-1"
+      ]
     },
     {
       "id": "int-pagerduty",
       "name": "PagerDuty",
       "category": "Alerts and Paging",
-      "sourceUrl": "https://docs.incident.io/integrations/pagerduty"
+      "sourceUrl": "https://docs.incident.io/integrations/pagerduty",
+      "signalPatterns": [
+        "pagerduty"
+      ],
+      "capabilityIds": [
+        "cap-oncall-1",
+        "cap-oncall-3"
+      ]
     },
     {
       "id": "int-opsgenie",
       "name": "Opsgenie",
       "category": "Alerts and Paging",
-      "sourceUrl": "https://docs.incident.io/integrations/opsgenie"
+      "sourceUrl": "https://docs.incident.io/integrations/opsgenie",
+      "signalPatterns": [
+        "opsgenie"
+      ],
+      "capabilityIds": [
+        "cap-oncall-1",
+        "cap-oncall-3"
+      ]
     },
     {
       "id": "int-datadog",
       "name": "Datadog",
       "category": "Alerts and Paging",
-      "sourceUrl": "https://docs.incident.io/integrations/datadog"
+      "sourceUrl": "https://docs.incident.io/integrations/datadog",
+      "signalPatterns": [
+        "datadog"
+      ],
+      "capabilityIds": [
+        "cap-oncall-3",
+        "cap-inv-3"
+      ]
     },
     {
       "id": "int-github",
       "name": "GitHub",
       "category": "Issue Tracking",
-      "sourceUrl": "https://docs.incident.io/integrations/github"
+      "sourceUrl": "https://docs.incident.io/integrations/github",
+      "signalPatterns": [
+        "github"
+      ],
+      "capabilityIds": [
+        "cap-inv-4",
+        "cap-inv-2"
+      ]
     },
     {
       "id": "int-gitlab",
       "name": "GitLab",
       "category": "Issue Tracking",
-      "sourceUrl": "https://docs.incident.io/integrations/gitlab"
+      "sourceUrl": "https://docs.incident.io/integrations/gitlab",
+      "signalPatterns": [
+        "gitlab"
+      ],
+      "capabilityIds": [
+        "cap-inv-4"
+      ]
     },
     {
       "id": "int-jira",
       "name": "Jira",
       "category": "Issue Tracking",
-      "sourceUrl": "https://docs.incident.io/integrations/jira"
+      "sourceUrl": "https://docs.incident.io/integrations/jira",
+      "signalPatterns": [
+        "jira"
+      ],
+      "capabilityIds": [
+        "cap-resp-2"
+      ]
     },
     {
       "id": "int-linear",
       "name": "Linear",
       "category": "Issue Tracking",
-      "sourceUrl": "https://docs.incident.io/integrations/linear"
+      "sourceUrl": "https://docs.incident.io/integrations/linear",
+      "signalPatterns": [
+        "linear"
+      ],
+      "capabilityIds": [
+        "cap-resp-2"
+      ]
     },
     {
       "id": "int-zendesk",
       "name": "Zendesk",
       "category": "Issue Tracking",
-      "sourceUrl": "https://docs.incident.io/integrations/zendesk"
+      "sourceUrl": "https://docs.incident.io/integrations/zendesk",
+      "signalPatterns": [
+        "zendesk"
+      ],
+      "capabilityIds": [
+        "cap-stat-4"
+      ]
     },
     {
       "id": "int-backstage",
       "name": "Backstage",
       "category": "Service Catalog",
-      "sourceUrl": "https://docs.incident.io/catalog/backstage"
+      "sourceUrl": "https://docs.incident.io/catalog/backstage",
+      "signalPatterns": [
+        "backstage"
+      ],
+      "capabilityIds": [
+        "cap-inv-2"
+      ]
     },
     {
       "id": "int-cortex",
       "name": "Cortex",
       "category": "Service Catalog",
-      "sourceUrl": "https://docs.incident.io/catalog/cortex"
+      "sourceUrl": "https://docs.incident.io/catalog/cortex",
+      "signalPatterns": [
+        "cortex"
+      ],
+      "capabilityIds": [
+        "cap-inv-2"
+      ]
     },
     {
       "id": "int-sentry",
       "name": "Sentry",
       "category": "Alerts and Paging",
-      "sourceUrl": "https://docs.incident.io/integrations/sentry"
+      "sourceUrl": "https://docs.incident.io/integrations/sentry",
+      "signalPatterns": [
+        "sentry"
+      ],
+      "capabilityIds": [
+        "cap-oncall-3",
+        "cap-inv-1"
+      ]
     },
     {
       "id": "int-splunk",
       "name": "Splunk",
       "category": "Alerts and Paging",
-      "sourceUrl": "https://docs.incident.io/integrations/splunk"
+      "sourceUrl": "https://docs.incident.io/integrations/splunk",
+      "signalPatterns": [
+        "splunk"
+      ],
+      "capabilityIds": [
+        "cap-inv-3"
+      ]
     },
     {
       "id": "int-newrelic",
       "name": "New Relic",
       "category": "Alerts and Paging",
-      "sourceUrl": "https://docs.incident.io/incidents/auto-create"
+      "sourceUrl": "https://docs.incident.io/incidents/auto-create",
+      "signalPatterns": [
+        "new relic",
+        "newrelic"
+      ],
+      "capabilityIds": [
+        "cap-inv-3"
+      ]
     },
     {
       "id": "int-zoom",
       "name": "Zoom",
       "category": "Video and Documents",
-      "sourceUrl": "https://docs.incident.io/integrations/zoom"
+      "sourceUrl": "https://docs.incident.io/integrations/zoom",
+      "signalPatterns": [
+        "zoom"
+      ],
+      "capabilityIds": [
+        "cap-resp-1"
+      ]
     },
     {
       "id": "int-googlemeet",
       "name": "Google Meet",
       "category": "Video and Documents",
-      "sourceUrl": "https://docs.incident.io/integrations/google-meet"
+      "sourceUrl": "https://docs.incident.io/integrations/google-meet",
+      "signalPatterns": [
+        "google meet"
+      ],
+      "capabilityIds": [
+        "cap-resp-1"
+      ]
     },
     {
       "id": "int-notion",
       "name": "Notion",
       "category": "Video and Documents",
-      "sourceUrl": "https://docs.incident.io/integrations/notion"
+      "sourceUrl": "https://docs.incident.io/integrations/notion",
+      "signalPatterns": [
+        "notion"
+      ],
+      "capabilityIds": [
+        "cap-resp-4"
+      ]
     },
     {
       "id": "int-confluence",
       "name": "Confluence",
       "category": "Video and Documents",
-      "sourceUrl": "https://docs.incident.io/integrations/confluence"
+      "sourceUrl": "https://docs.incident.io/integrations/confluence",
+      "signalPatterns": [
+        "confluence"
+      ],
+      "capabilityIds": [
+        "cap-resp-4"
+      ]
     },
     {
       "id": "int-bamboohr",
       "name": "BambooHR",
       "category": "HR Systems",
-      "sourceUrl": "https://docs.incident.io/on-call/holidays"
+      "sourceUrl": "https://docs.incident.io/on-call/holidays",
+      "signalPatterns": [
+        "bamboohr"
+      ],
+      "capabilityIds": [
+        "cap-oncall-4"
+      ]
     },
     {
       "id": "int-aws",
       "name": "AWS",
       "category": "Everything Else",
-      "sourceUrl": "https://docs.incident.io/admin/audit-logs"
+      "sourceUrl": "https://docs.incident.io/admin/audit-logs",
+      "signalPatterns": [
+        "aws",
+        "amazon web services"
+      ],
+      "capabilityIds": [
+        "cap-inv-2"
+      ]
     }
   ]
 }

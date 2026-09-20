@@ -135,6 +135,15 @@ const Storage = {
 // the neutral member rather than silently carried through.
 const EVIDENCE_SOURCE_TYPES = ['status-page', 'careers', 'engineering', 'blog', 'github', 'homepage', 'other'];
 const SCENARIO_ACTORS = ['prospect', 'incident.io', 'system'];
+const SCENARIO_PHASES = ['alert', 'routing', 'investigation', 'response', 'customer-update', 'postmortem'];
+// Provenance of an ROI input: what kind of claim the starting number is.
+const ROI_SOURCES = ['account-size-heuristic', 'industry-benchmark', 'illustrative-placeholder', 'account-evidence'];
+const ROI_SOURCE_LABEL = {
+  'account-size-heuristic': 'Scaled from account size/industry',
+  'industry-benchmark': 'Industry benchmark placeholder',
+  'illustrative-placeholder': 'Illustrative placeholder',
+  'account-evidence': 'Derived from this account\'s public evidence',
+};
 
 const SOURCE_TYPE_LABEL = {
   'status-page': 'Status page', careers: 'Careers page', engineering: 'Engineering page',
@@ -149,7 +158,10 @@ const Models = {
       name: a.name,
       industry: a.industry || null,
       createdAt: a.createdAt || nowIso(),
-      alreadyCustomer: !!a.alreadyCustomer,
+      // Unknown is a real state, not a default of false: a live public-page
+      // lookup cannot establish customer status, so null is carried through and
+      // rendered/exported as unknown.
+      alreadyCustomer: a.alreadyCustomer == null ? (a.live ? null : false) : !!a.alreadyCustomer,
       live: !!a.live,
     };
   },
@@ -207,6 +219,12 @@ const Models = {
       name: i.name,
       category: i.category,
       sourceUrl: i.sourceUrl,
+      // Relationships, not just metadata (PRD section 5, "Integration"):
+      // signalPatterns are the public phrases that indicate this tool, which is
+      // how an integration is linked to a Signal/Evidence; capabilityIds are the
+      // incident.io capabilities it feeds once connected.
+      signalPatterns: (i.signalPatterns || []).map((p) => String(p).toLowerCase()),
+      capabilityIds: i.capabilityIds || [],
     };
   },
   recommendation({ id, accountId, capabilityId, integrationId, ruleId, reasons, evidenceIds }) {
@@ -231,12 +249,17 @@ const Models = {
       // evidence or is an illustrative hypothesis.
       actor: SCENARIO_ACTORS.includes(s.actor) ? s.actor : 'prospect', // prospect|incident.io|system
       system: s.system || '',
+      // The incident.io capability this moment of the walkthrough proposes.
+      // Kept separate from `system`, which names the tool they are observed (or
+      // hypothesized) to use today: the step shows the current workflow and the
+      // proposed capability side by side rather than conflating them.
+      capabilityId: s.capabilityId || null,
       origin: s.origin === 'evidence' || s.origin === 'hypothesis'
         ? s.origin
         : (personalizedFrom.length ? 'evidence' : 'hypothesis'),
     };
   },
-  roiAssumption({ id, accountId, key, label, value, unit, editable, note, min, step, lever }) {
+  roiAssumption({ id, accountId, key, label, value, unit, editable, note, min, step, lever, source, scenario }) {
     return {
       id: id || hashId('roi', accountId, key, lever),
       accountId: accountId || null,
@@ -249,6 +272,13 @@ const Models = {
       min: min == null ? 0 : min,
       step: step == null ? 1 : step,
       lever, // downtime|engineer-time|consolidation
+      // Where the number came from, as a closed vocabulary rather than only
+      // prose, and the scenario phase whose cost/time it moves. Both are
+      // required by PRD section 5 ("named input, value, unit, source, editable
+      // flag and scenario") so a figure can never be shown without saying what
+      // kind of claim it is.
+      source: ROI_SOURCES.includes(source) ? source : 'illustrative-placeholder',
+      scenario: SCENARIO_PHASES.includes(scenario) ? scenario : null,
     };
   },
   briefVersion({ id, accountId, version, mode, createdAt, assumptions, content }) {
@@ -264,6 +294,7 @@ const Models = {
       // a stored version never re-renders with numbers it was not saved with.
       roiAssumptions: Object.freeze((assumptions || []).map((a) => Object.freeze({
         id: a.id, key: a.key, label: a.label, value: a.value, unit: a.unit, lever: a.lever,
+        source: a.source, scenario: a.scenario,
       }))),
       // Immutable snapshot of the brief as generated, not just its ROI inputs:
       // a stored version can be re-read exactly as it was written, even if the
@@ -280,6 +311,7 @@ const Models = {
         }))),
         scenarioSteps: Object.freeze((c.scenarioSteps || []).map((s) => Object.freeze({
           order: s.order, phase: s.phase, text: s.text, actor: s.actor, system: s.system, origin: s.origin,
+          capabilityId: s.capabilityId,
         }))),
       }),
       createdAt: createdAt || nowIso(),
@@ -566,10 +598,15 @@ const Matcher = {
       ...signals.map((s) => ({ text: s.label, evidenceIds: s.evidenceIds })),
     ];
     const recs = [];
+    const wordRe = (term) => new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
     integrations.forEach((integration) => {
       if (integration.name.toLowerCase() === account.name.toLowerCase()) return;
-      const re = new RegExp(`\\b${integration.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
-      const hit = haystacks.find((h) => re.test(h.text));
+      // The integration's own name plus its declared signal phrases ("amazon web
+      // services" for AWS): that list is the modeled link between an Integration
+      // and the Signals/Evidence that indicate it. Still an exact word match -
+      // nothing is inferred beyond the phrase appearing in their own evidence.
+      const patterns = [integration.name, ...integration.signalPatterns].map(wordRe);
+      const hit = haystacks.find((h) => patterns.some((re) => re.test(h.text)));
       if (!hit) return;
       recs.push(Models.recommendation({
         accountId: account.id,
@@ -648,30 +685,37 @@ const Roi = {
       assumption({
         key: 'incidentsPerMonth', label: 'Incidents per month', value: Math.round(4 * scale), unit: 'incidents',
         note: 'Illustrative starting point based on account size/industry - replace with the prospect\'s own number.', min: 0, step: 1, lever: 'downtime',
+        source: 'account-size-heuristic', scenario: 'alert',
       }),
       assumption({
         key: 'minutesReducedPerIncident', label: 'Downtime reduced per incident', value: Math.round(18 * scale), unit: 'minutes',
         note: 'Faster routing/investigation is assumed to shave this many minutes off mean time to resolution.', min: 0, step: 1, lever: 'downtime',
+        source: 'illustrative-placeholder', scenario: 'investigation',
       }),
       assumption({
         key: 'costPerMinuteDowntime', label: 'Cost of downtime', value: industry.includes('bank') ? 400 : 150, unit: '$ / minute',
         note: 'Benchmark placeholder - swap for the prospect\'s own revenue-at-risk figure.', min: 0, step: 10, lever: 'downtime',
+        source: 'industry-benchmark', scenario: 'response',
       }),
       assumption({
         key: 'hoursReclaimedPerIncident', label: 'Engineer hours reclaimed per incident', value: 2.5, unit: 'hours',
         note: 'Time saved on manual paging, timeline-building and status drafting per incident.', min: 0, step: 0.5, lever: 'engineer-time',
+        source: 'illustrative-placeholder', scenario: 'postmortem',
       }),
       assumption({
         key: 'engineerHourlyRate', label: 'Fully loaded engineer rate', value: 90, unit: '$ / hour',
         note: 'Illustrative fully-loaded engineering cost - not a real payroll figure.', min: 0, step: 5, lever: 'engineer-time',
+        source: 'industry-benchmark', scenario: 'postmortem',
       }),
       assumption({
         key: 'toolsConsolidated', label: 'Point tools consolidated', value: accountBundle.account.alreadyCustomer ? 1 : 2, unit: 'tools',
         note: 'Paging/status/timeline tools this account could retire by consolidating onto incident.io.', min: 0, step: 1, lever: 'consolidation',
+        source: 'account-evidence', scenario: 'customer-update',
       }),
       assumption({
         key: 'costPerTool', label: 'Average cost per tool', value: 220, unit: '$ / month',
         note: 'Illustrative average monthly seat/licence cost for a point tool being replaced.', min: 0, step: 10, lever: 'consolidation',
+        source: 'industry-benchmark', scenario: 'routing',
       }),
     ];
   },
@@ -858,7 +902,9 @@ dom.modeSwitch.addEventListener('click', (ev) => {
   recordEvent('mode-switch', { accountId, from: state.mode, to: target });
   if (target === 'share') {
     // Carry the current assumptions into the share URL so the link is shareable as-is.
-    location.hash = shareHash(accountId, ensureRoiState(accountId).assumptions);
+    const bundle = DataStore.getAccountBundle(accountId);
+    if (!bundle) return;
+    location.hash = shareHash(bundle.account, ensureRoiState(accountId).assumptions);
   } else {
     location.hash = `#/a/${accountId}/brief`;
   }
@@ -896,30 +942,42 @@ const RoiUrl = {
 
 // Live share links carry the researched domain as well as the ROI assumptions:
 // a live account id is a hash, so without the domain a recipient who has never
-// run that lookup has nothing to re-run.
-function shareHash(accountId, assumptions) {
-  const bundle = DataStore.getAccountBundle(accountId);
-  const domainParam = bundle && bundle.account.live ? `&d=${encodeURIComponent(bundle.account.domain)}` : '';
-  return `#/a/${accountId}/share?roi=${encodeURIComponent(RoiUrl.encode(assumptions))}${domainParam}`;
+// run that lookup has nothing to re-run. Both helpers take the account object
+// they describe, so a render can build a link from the view state it was handed
+// instead of looking the account up in DataStore.
+function shareHash(account, assumptions) {
+  const domainParam = account.live ? `&d=${encodeURIComponent(account.domain)}` : '';
+  return `#/a/${account.id}/share?roi=${encodeURIComponent(RoiUrl.encode(assumptions))}${domainParam}`;
 }
 
-function shareUrl(accountId, assumptions) {
-  return `${location.origin}${location.pathname}${location.search}${shareHash(accountId, assumptions)}`;
+function shareUrl(account, assumptions) {
+  return `${location.origin}${location.pathname}${location.search}${shareHash(account, assumptions)}`;
 }
 
-// Apply the URL's assumptions once per account, so later re-renders of the same
-// link do not stomp on edits made in the share view.
+// Hydration is keyed on the payload the link carries, not on the account alone:
+// opening a second link for the same prospect with different assumptions must
+// display that second link's numbers. The key is the raw `roi` parameter, so
+// re-rendering (or editing inside) the same link does not stomp on live edits,
+// while a genuinely different payload re-seeds from the baseline - keys the new
+// link omits fall back to the baseline instead of inheriting the old link's
+// value. Navigating to a route with no `roi` parameter at all changes nothing,
+// so AE-side edits survive moving between screens.
 function hydrateRoiFromRoute(accountId, query) {
-  const roiState = ensureRoiState(accountId);
-  if (state.roiHydrated[accountId]) return roiState;
-  state.roiHydrated[accountId] = true;
-  const overrides = RoiUrl.decode(query && query.roi);
-  roiState.assumptions.forEach((a) => {
+  const payload = (query && query.roi) || '';
+  const known = Object.prototype.hasOwnProperty.call(state.roiHydrated, accountId);
+  if (known && (!payload || state.roiHydrated[accountId] === payload)) return ensureRoiState(accountId);
+  const bundle = DataStore.getAccountBundle(accountId);
+  if (!bundle) return ensureRoiState(accountId);
+  const assumptions = Roi.baselineAssumptions(bundle);
+  const overrides = RoiUrl.decode(payload);
+  assumptions.forEach((a) => {
     if (Object.prototype.hasOwnProperty.call(overrides, a.key)) {
       a.value = clamp(overrides[a.key], a.min, Infinity);
     }
   });
-  return roiState;
+  state.roiByAccount[accountId] = { assumptions };
+  state.roiHydrated[accountId] = payload;
+  return state.roiByAccount[accountId];
 }
 
 /* ---------- controller actions ----------------------------------------------
@@ -943,41 +1001,75 @@ function loadAccountViewData(accountId) {
   return snapshot;
 }
 
-function accountViewData(accountId) {
-  return state.viewData[accountId] || { internalBrief: null, shareBrief: null, recentEvents: [], share: null };
-}
-
-// Route preparation for the share screen. Share mode is a single consolidated
-// screen, so everything it needs is resolved here - the bundle, the
-// deterministic recommendations, the knowledge base and the ROI assumptions
-// (initialized, not created by the render) - and handed over via state.viewData.
-function prepareShareView(accountId) {
+/* Route preparation for every account-scoped screen. Everything a screen needs
+ * is resolved here - the bundle, the deterministic recommendations, the
+ * knowledge base, the ROI assumptions (initialized, not created by a render),
+ * the share link and the brief version that identifies the displayed snapshot.
+ * The result is handed to the screen as an argument, so no render function
+ * reads DataStore, LiveBundleStore or any other store itself. */
+function prepareAccountView(accountId, screen) {
   const bundle = DataStore.getAccountBundle(accountId);
   if (!bundle) return null;
+  const assumptions = ensureRoiState(accountId).assumptions;
+  const recommendations = Matcher.buildRecommendations(bundle, DataStore.capabilities, DataStore.integrations);
   const view = {
+    accountId,
+    screen,
     bundle,
-    recommendations: Matcher.buildRecommendations(bundle, DataStore.capabilities, DataStore.integrations),
+    recommendations,
     capabilities: DataStore.capabilities,
     integrations: DataStore.integrations,
-    assumptions: ensureRoiState(accountId).assumptions,
+    assumptions,
+    content: buildBriefContent(bundle, recommendations, DataStore.capabilities, DataStore.integrations),
+    shareHash: shareHash(bundle.account, assumptions),
+    built: !!state.builtBrief[accountId],
+    brief: null,
+    recentEvents: [],
   };
-  const snapshot = state.viewData[accountId] || loadAccountViewData(accountId);
-  snapshot.share = view;
+  if (screen === 'share') {
+    view.brief = ensureShareVersion(accountId, view.content, assumptions);
+    view.built = true;
+  } else if (state.builtBrief[accountId]) {
+    // A story on screen always has a version behind it - including one first
+    // built by opening a share link - so feedback is never recorded against a
+    // null brief id, and the label always names the snapshot being displayed.
+    view.brief = versionForDisplay(accountId, 'internal', view.content, assumptions);
+    view.built = true;
+  }
+  const snapshot = loadAccountViewData(accountId);
+  snapshot.view = view;
+  view.recentEvents = snapshot.recentEvents;
   return view;
+}
+
+// Controller action: the ROI reset button asks for a fresh baseline; reading
+// the bundle for it happens here, not in the render.
+function resetRoiAssumptions(accountId) {
+  const bundle = DataStore.getAccountBundle(accountId);
+  if (!bundle) return null;
+  state.roiByAccount[accountId] = { assumptions: Roi.baselineAssumptions(bundle) };
+  recordEvent('roi-reset', { accountId });
+  return state.roiByAccount[accountId];
+}
+
+// Controller action: the domain a live-recovery link points at, read from the
+// link itself or from a bundle this browser stored earlier.
+function recoveryDomainFor(route) {
+  return (route.query && route.query.d) || LiveBundleStore.domainFor(route.accountId) || '';
 }
 
 // The generated brief as content: hypotheses, discovery questions, the
 // deterministic product map and the scenario, resolved to the copy actually
 // shown. Pure - it reads the bundle and the knowledge base, nothing else.
-function buildBriefContent(bundle, recs) {
+function buildBriefContent(bundle, recs, capabilities, integrations) {
   const { account, hypotheses, scenarioSteps } = bundle;
   return {
     headline: `${account.name} - reliability story from ${bundle.evidences.length} public source${bundle.evidences.length === 1 ? '' : 's'}`,
     hypotheses: hypotheses.map((h) => ({ id: h.id, statement: h.statement, confidence: h.confidence, evidenceIds: h.evidenceIds })),
     questions: Matcher.deriveDiscoveryQuestions(hypotheses),
     recommendations: recs.map((r) => {
-      const capability = r.capabilityId ? byId(DataStore.capabilities, r.capabilityId) : null;
-      const integration = r.integrationId ? byId(DataStore.integrations, r.integrationId) : null;
+      const capability = r.capabilityId ? byId(capabilities, r.capabilityId) : null;
+      const integration = r.integrationId ? byId(integrations, r.integrationId) : null;
       return {
         id: r.id,
         ruleId: r.ruleId,
@@ -992,31 +1084,58 @@ function buildBriefContent(bundle, recs) {
 }
 
 // Freeze a brief version together with the content and the ROI assumptions it
-// was saved with.
-function saveVersion(accountId, mode) {
+// was saved with. Both can be passed in, so a version always snapshots exactly
+// what the screen is about to display rather than re-deriving it later.
+function saveVersion(accountId, mode, opts) {
+  const o = opts || {};
   const bundle = DataStore.getAccountBundle(accountId);
+  const content = o.content
+    || (bundle ? buildBriefContent(bundle, Matcher.buildRecommendations(bundle, DataStore.capabilities, DataStore.integrations), DataStore.capabilities, DataStore.integrations) : null);
   const brief = Models.briefVersion({
     accountId,
     version: BriefVersionStore.nextVersionNumber(accountId, mode),
     mode,
-    assumptions: ensureRoiState(accountId).assumptions,
-    content: bundle ? buildBriefContent(bundle, Matcher.buildRecommendations(bundle, DataStore.capabilities, DataStore.integrations)) : null,
+    assumptions: o.assumptions || ensureRoiState(accountId).assumptions,
+    content,
   });
   BriefVersionStore.add(brief);
   recordEvent('brief-built', { accountId, version: brief.version, mode });
   const snapshot = loadAccountViewData(accountId);
   // Keep the in-memory snapshot correct even when localStorage is unavailable.
-  if (mode === 'share') snapshot.shareBrief = snapshot.shareBrief || brief;
-  else snapshot.internalBrief = snapshot.internalBrief || brief;
+  if (mode === 'share') snapshot.shareBrief = brief;
+  else snapshot.internalBrief = brief;
   return brief;
 }
 
-// Share mode implies the reliability story exists; save a share version once.
-function ensureShareVersion(accountId) {
+/* A version label has to identify the snapshot actually on screen. The stored
+ * snapshot is compared against what is about to be displayed - the brief content
+ * and the ROI assumptions - and the existing version is reused only when they
+ * match. A different payload (a second share link with different numbers, an
+ * account whose evidence changed) gets its own version instead of being labelled
+ * with an earlier version's number while showing different figures. */
+function snapshotSignature(content, assumptions) {
+  const c = content || {};
+  return JSON.stringify({
+    headline: c.headline || '',
+    hypotheses: (c.hypotheses || []).map((h) => h.id),
+    recommendations: (c.recommendations || []).map((r) => r.id),
+    scenario: (c.scenarioSteps || []).map((s) => `${s.order}:${s.text}`),
+    roi: (assumptions || []).map((a) => `${a.key}:${a.value}`),
+  });
+}
+
+function versionForDisplay(accountId, mode, content, assumptions) {
+  const latest = BriefVersionStore.latestFor(accountId, mode);
+  if (latest && snapshotSignature(latest.content, latest.roiAssumptions) === snapshotSignature(content, assumptions)) return latest;
+  return saveVersion(accountId, mode, { content, assumptions });
+}
+
+// Share mode implies the reliability story exists, so the story is marked built
+// and a share version covering the displayed snapshot always exists - that is
+// the version feedback from a share-first session is attached to.
+function ensureShareVersion(accountId, content, assumptions) {
   state.builtBrief[accountId] = true;
-  const existing = BriefVersionStore.latestFor(accountId, 'share');
-  if (existing) return existing;
-  return saveVersion(accountId, 'share');
+  return versionForDisplay(accountId, 'share', content, assumptions);
 }
 
 // Fixture sanity check: the PRD promises three hypotheses per account, so a
@@ -1144,7 +1263,11 @@ function sourceLink(url, label) {
 }
 
 function customerChip(alreadyCustomer) {
-  return alreadyCustomer ? `<span class="chip chip-customer">Existing incident.io customer</span>` : '';
+  if (alreadyCustomer) return `<span class="chip chip-customer">Existing incident.io customer</span>`;
+  // null = nothing public established it either way. Saying so is honest; a
+  // silent absence would read as "confirmed not a customer".
+  if (alreadyCustomer == null) return `<span class="chip chip-unknown"><span class="g">?</span> Customer status not publicly confirmed</span>`;
+  return '';
 }
 
 // Plainspoken note about how the fixtures were chosen. Shown on the picker
@@ -1186,12 +1309,12 @@ function evidenceCountSummary(bundle) {
  * it comes from a stored bundle when there is one, or from the `d` parameter the
  * share link carries. Either way the answer is an offer to re-run the lookup,
  * never a dead end. */
-function screenLiveRecovery(route) {
-  const accountId = route.accountId;
+// `domain` is resolved by the controller (recoveryDomainFor) from the link and
+// the stored live bundles; this render reads no store itself.
+function screenLiveRecovery(accountId, domain) {
   renderStepRail(null);
   renderModeSwitch(null);
   setActionBar('');
-  const domain = (route.query && route.query.d) || LiveBundleStore.domainFor(accountId) || '';
   renderView(`
     <div class="section-head">
       <div class="eyebrow">Live prospect<span class="sep">·</span>Not in this browser</div>
@@ -1249,7 +1372,10 @@ function screenLiveRecovery(route) {
   });
 }
 
-function screenAccountPicker() {
+// `catalog` is prepared by the controller: { accounts, error }. The picker, like
+// every other screen, renders from what it was handed.
+function screenAccountPicker(catalog) {
+  const { accounts, error } = catalog;
   renderStepRail(null);
   renderModeSwitch(null);
 
@@ -1257,14 +1383,14 @@ function screenAccountPicker() {
     setActionBar('');
     renderFailure(
       'Fixtures failed to load',
-      `Could not load the cached prospect data (${DataStore.error || 'unknown error'}). A reload is the only dependency this demo has.`,
+      `Could not load the cached prospect data (${error || 'unknown error'}). A reload is the only dependency this demo has.`,
       '#/',
       { reload: true },
     );
     return;
   }
 
-  if (!DataStore.accounts.length) {
+  if (!accounts.length) {
     setActionBar('');
     renderView(`
       <div class="section-head">
@@ -1276,7 +1402,7 @@ function screenAccountPicker() {
     return;
   }
 
-  const cards = DataStore.accounts.map((bundle) => {
+  const cards = accounts.map((bundle) => {
     const { account } = bundle;
     const counts = evidenceCountSummary(bundle);
     return `
@@ -1314,7 +1440,7 @@ function screenAccountPicker() {
         <div class="tiny muted" id="domain-status" role="status" aria-live="polite">Reads the company site, status page, engineering blog and careers pages. Public pages only, every claim linked.</div>
       </form>
     </section>
-    <div class="section-head picker-examples"><div class="eyebrow">Recent examples<span class="sep">·</span>${DataStore.accounts.filter((b) => !b.account.live).length} preloaded</div></div>
+    <div class="section-head picker-examples"><div class="eyebrow">Recent examples<span class="sep">·</span>${accounts.filter((b) => !b.account.live).length} preloaded</div></div>
     <div class="stack">
       ${cards}
     </div>
@@ -1412,9 +1538,10 @@ function evidenceCardHtml(evidence) {
   `;
 }
 
-function screenEvidence(accountId) {
-  const bundle = DataStore.getAccountBundle(accountId);
-  if (!bundle) return renderFailure('Account not found', 'That prospect id does not match a loaded fixture.', '#/');
+// `view` is the controller-prepared state (prepareAccountView); this function
+// reads nothing but its argument.
+function screenEvidence(view) {
+  const { accountId, bundle } = view;
   renderStepRail(accountId, 'evidence');
   renderModeSwitch(accountId);
 
@@ -1467,11 +1594,15 @@ function recommendationCard(rec, capabilities, integrations, evidences, opts) {
   const desc = capability ? capability.description : `Official incident.io integration (${integration.category}).`;
   const sourceUrl = capability ? capability.sourceUrl : integration.sourceUrl;
   const supporting = rec.evidenceIds.map((id) => byId(evidences, id)).filter(Boolean);
+  // An integration is modeled as feeding specific capabilities, so the card says
+  // which ones rather than leaving the relationship implicit.
+  const feeds = integration ? integration.capabilityIds.map((id) => byId(capabilities, id)).filter(Boolean) : [];
   return `
     <div class="card rec">
       <div class="rec-head"><span class="chip">${escapeHtml(area)}</span></div>
       <h3>${escapeHtml(title)}</h3>
       <p class="small muted">${escapeHtml(desc)}</p>
+      ${feeds.length ? `<p class="tiny muted">Feeds: ${feeds.map((c) => escapeHtml(`${c.product} - ${c.name}`)).join(' · ')}</p>` : ''}
       <p class="rec-why">${mode === 'internal' ? '<strong>Why this?</strong> ' : ''}${escapeHtml(rec.reasons[0])}</p>
       <div class="rec-foot">
         ${sourceLink(sourceUrl, 'Official incident.io page')}
@@ -1487,14 +1618,13 @@ function recommendationCard(rec, capabilities, integrations, evidences, opts) {
   `;
 }
 
-function screenBrief(accountId) {
-  const bundle = DataStore.getAccountBundle(accountId);
-  if (!bundle) return renderFailure('Account not found', 'That prospect id does not match a loaded fixture.', '#/');
+function screenBrief(view) {
+  const { accountId, bundle, capabilities, integrations, assumptions } = view;
   renderStepRail(accountId, 'brief');
   renderModeSwitch(accountId);
 
   const { account, evidences, signals, hypotheses } = bundle;
-  const built = !!state.builtBrief[accountId];
+  const built = view.built;
 
   if (!built) {
     renderView(`
@@ -1524,8 +1654,9 @@ function screenBrief(accountId) {
       const btn = document.getElementById('build-story-btn');
       if (!btn || btn.dataset.working) return;
       const finish = () => {
+        // The controller saves the version for the snapshot it is about to
+        // display (prepareAccountView); this handler only flips the state.
         state.builtBrief[accountId] = true;
-        saveVersion(accountId, 'internal');
         forceFreshRender = true; // same route, but the story arriving deserves a full entrance
         render();
         showToast('Reliability story generated from the evidence ledger.');
@@ -1552,13 +1683,14 @@ function screenBrief(accountId) {
     return;
   }
 
-  const recs = Matcher.buildRecommendations(bundle, DataStore.capabilities, DataStore.integrations);
+  // Recommendations, the knowledge base, the brief version and the event trail
+  // were all resolved by the controller (prepareAccountView) before this render
+  // ran; render functions never touch the stores themselves.
+  const recs = view.recommendations;
   const capRecs = recs.filter((r) => r.capabilityId);
   const intRecs = recs.filter((r) => r.integrationId);
   const questions = Matcher.deriveDiscoveryQuestions(hypotheses);
-  // Persisted data was read by the controller (loadAccountViewData) before this
-  // render ran; render functions never touch the stores themselves.
-  const { internalBrief: brief, recentEvents } = accountViewData(accountId);
+  const { brief, recentEvents } = view;
 
   renderView(`
     ${accountHeader(account, LiveCopy.pick(account,
@@ -1591,7 +1723,7 @@ function screenBrief(accountId) {
       <p class="small muted">Matcher <span class="mono">${escapeHtml(Matcher.version)}</span>, deterministic rules only - every match shows its rule and evidence. ${escapeHtml(LiveCopy.note(account))}</p>
     </div>
     <div class="stack">
-      ${capRecs.length ? capRecs.map((r) => recommendationCard(r, DataStore.capabilities, DataStore.integrations, evidences)).join('') : renderEmpty('No capability matches', 'No signal matched a capability rule for this account.')}
+      ${capRecs.length ? capRecs.map((r) => recommendationCard(r, capabilities, integrations, evidences)).join('') : renderEmpty('No capability matches', 'No signal matched a capability rule for this account.')}
     </div>
 
     <div class="section-head">
@@ -1602,7 +1734,7 @@ function screenBrief(accountId) {
         'Only recommended when the integration\'s name appears in the account\'s own public evidence.')}</p>
     </div>
     <div class="stack">
-      ${intRecs.length ? intRecs.map((r) => recommendationCard(r, DataStore.capabilities, DataStore.integrations, evidences)).join('') : renderEmpty('No integration matches', 'No public evidence explicitly named one of the official integrations for this account.')}
+      ${intRecs.length ? intRecs.map((r) => recommendationCard(r, capabilities, integrations, evidences)).join('') : renderEmpty('No integration matches', 'No public evidence explicitly named one of the official integrations for this account.')}
     </div>
 
     ${brief ? `<p class="tiny muted" style="margin-top:18px;">Brief v${brief.version} · generated ${fmtDate(brief.createdAt)} · matcher ${escapeHtml(brief.matcherVersion)}</p>` : ''}
@@ -1623,7 +1755,7 @@ function screenBrief(accountId) {
     </div>
     <details class="disclosure" style="margin-top:10px;">
       <summary>Show the typed Opportunity payload</summary>
-      <pre class="pre" id="sf-payload">${escapeHtml(JSON.stringify(buildSalesforcePayload(bundle, recs, Roi.calculate(Roi.assumptionsAsMap(ensureRoiState(accountId).assumptions)), brief), null, 2))}</pre>
+      <pre class="pre" id="sf-payload">${escapeHtml(JSON.stringify(buildSalesforcePayload(bundle, recs, Roi.calculate(Roi.assumptionsAsMap(assumptions)), brief, capabilities, integrations), null, 2))}</pre>
     </details>
     <div class="row" style="margin-top:10px;">
       <button class="btn" type="button" id="copy-sf-payload">Copy JSON</button>
@@ -1701,8 +1833,13 @@ const ACTOR_LABEL = {
 
 const scenarioActiveStep = {}; // accountId -> order (1-based)
 
-function scenarioStepHtml(step, signals, isActive, isDone, showState) {
+function scenarioStepHtml(step, signals, capabilities, isActive, isDone, showState) {
   const personalized = step.personalizedFrom.map((id) => byId(signals, id)).filter(Boolean);
+  // The step names the tool they use today (`system`) and, separately, the
+  // incident.io capability being proposed for that moment - so a walkthrough
+  // that coordinates in FireHydrant and publishes to Atlassian Statuspage still
+  // shows what incident.io would do there, without overwriting what they run.
+  const capability = step.capabilityId ? byId(capabilities, step.capabilityId) : null;
   const stateClass = isActive ? 'is-active' : isDone ? 'is-done' : '';
   const stateChip = showState === false ? ''
     : isActive ? '<span class="chip chip-live">Live now</span>'
@@ -1718,6 +1855,7 @@ function scenarioStepHtml(step, signals, isActive, isDone, showState) {
         </div>
         <p>${escapeHtml(step.text)}</p>
         <p class="tiny muted">${escapeHtml(ACTOR_LABEL[step.actor] || ACTOR_LABEL.prospect)}${step.system ? ` · ${escapeHtml(step.system)}` : ''}</p>
+        ${capability ? `<p class="tiny muted">Where incident.io would fit: ${sourceLink(capability.sourceUrl, `${capability.product} - ${capability.name}`)}</p>` : ''}
         ${step.origin === 'evidence' && personalized.length
           ? `<div class="step-src"><span class="tiny muted">From observed signals</span><div class="chiprow">${personalized.map((s) => `<span class="chip chip-strong">${escapeHtml(s.label)}</span>`).join('')}</div></div>`
           : `<span class="chip chip-unknown"><span class="g">?</span> Illustrative - not tied to observed evidence</span>`}
@@ -1726,9 +1864,8 @@ function scenarioStepHtml(step, signals, isActive, isDone, showState) {
   `;
 }
 
-function screenScenario(accountId) {
-  const bundle = DataStore.getAccountBundle(accountId);
-  if (!bundle) return renderFailure('Account not found', 'That prospect id does not match a loaded fixture.', '#/');
+function screenScenario(view) {
+  const { accountId, bundle } = view;
   renderStepRail(accountId, 'scenario');
   renderModeSwitch(accountId);
 
@@ -1751,7 +1888,7 @@ function screenScenario(accountId) {
       'A compact incident walkthrough personalized to their observed or hypothesized stack. Steps not tied to public evidence are clearly marked illustrative, never presented as fact.'))}
     <div class="section-head"><div class="eyebrow">Scenario<span class="sep">·</span>Step ${active} of ${scenarioSteps.length}<span class="sep">·</span>${escapeHtml(PHASE_LABEL[scenarioSteps[active - 1].phase] || scenarioSteps[active - 1].phase)}</div></div>
     <ol class="rail">
-      ${scenarioSteps.map((s) => scenarioStepHtml(s, signals, s.order === active, s.order < active)).join('')}
+      ${scenarioSteps.map((s) => scenarioStepHtml(s, signals, view.capabilities, s.order === active, s.order < active)).join('')}
     </ol>
   `);
 
@@ -1870,6 +2007,7 @@ function leverHtml(leverKey, assumptions, result) {
             <span class="unit">${escapeHtml(a.unit)}</span>
           </div>
           <span class="note">${escapeHtml(a.note)}</span>
+          <span class="note">Source: ${escapeHtml(ROI_SOURCE_LABEL[a.source] || a.source)}${a.scenario ? ` · Scenario step: ${escapeHtml(PHASE_LABEL[a.scenario] || a.scenario)}` : ''}</span>
         </div>
       `).join('')}
       <div class="result" id="result-${leverKey}">${leverResultHtml(result)}</div>
@@ -1877,23 +2015,21 @@ function leverHtml(leverKey, assumptions, result) {
   `;
 }
 
-function screenRoi(accountId) {
-  const bundle = DataStore.getAccountBundle(accountId);
-  if (!bundle) return renderFailure('Account not found', 'That prospect id does not match a loaded fixture.', '#/');
+function screenRoi(view) {
+  const { accountId, bundle, assumptions } = view;
   renderStepRail(accountId, 'roi');
   renderModeSwitch(accountId);
 
-  const roiState = ensureRoiState(accountId);
-  const values = Roi.assumptionsAsMap(roiState.assumptions);
+  const values = Roi.assumptionsAsMap(assumptions);
   const results = Roi.calculate(values);
 
   renderView(`
     ${accountHeader(bundle.account, 'Three editable levers. Every formula stays visible next to its result and nothing here is a guarantee - these are assumptions you and the prospect can change together.')}
 
     <div class="section-head"><div class="eyebrow">Business case<span class="sep">·</span>3 editable levers</div></div>
-    ${leverHtml('downtime', roiState.assumptions, results.downtime)}
-    ${leverHtml('engineer-time', roiState.assumptions, results.engineerTime)}
-    ${leverHtml('consolidation', roiState.assumptions, results.consolidation)}
+    ${leverHtml('downtime', assumptions, results.downtime)}
+    ${leverHtml('engineer-time', assumptions, results.engineerTime)}
+    ${leverHtml('consolidation', assumptions, results.consolidation)}
 
     <section class="pause" aria-labelledby="roi-total-title">
       <div class="eyebrow" id="roi-total-title">Illustrative total<span class="sep">·</span>Not a guarantee</div>
@@ -1908,7 +2044,7 @@ function screenRoi(accountId) {
 
   setActionBar(`
     <div class="wrap">
-      <a class="btn btn-primary btn-block" id="to-share-link" href="${escapeHtml(shareHash(accountId, roiState.assumptions))}">Switch to share mode</a>
+      <a class="btn btn-primary btn-block" id="to-share-link" href="${escapeHtml(view.shareHash)}">Switch to share mode</a>
     </div>
   `);
 
@@ -1918,22 +2054,22 @@ function screenRoi(accountId) {
   dom.view.querySelectorAll('[data-roi-key]').forEach((input) => {
     input.addEventListener('input', () => {
       const key = input.getAttribute('data-roi-key');
-      const assumption = roiState.assumptions.find((a) => a.key === key);
+      const assumption = assumptions.find((a) => a.key === key);
       if (!assumption) return;
       assumption.value = clamp(toNumber(input.value, assumption.value), assumption.min, Infinity);
       recordEvent('roi-edit', { accountId, key, value: assumption.value });
-      refreshRoiResultBlocks(roiState.assumptions);
+      refreshRoiResultBlocks(assumptions);
       // Keep the share hand-off link carrying the assumptions as edited.
       const toShare = document.getElementById('to-share-link');
-      if (toShare) toShare.setAttribute('href', shareHash(accountId, roiState.assumptions));
+      if (toShare) toShare.setAttribute('href', shareHash(bundle.account, assumptions));
     });
   });
 
   document.getElementById('roi-reset').addEventListener('click', () => {
-    state.roiByAccount[accountId] = { assumptions: Roi.baselineAssumptions(bundle) };
-    recordEvent('roi-reset', { accountId });
+    // The reset itself is a controller action; the screen just re-renders.
+    resetRoiAssumptions(accountId);
     showToast('ROI assumptions reset to the fixture baseline.');
-    screenRoi(accountId);
+    render();
   });
 }
 
@@ -1941,10 +2077,10 @@ function screenRoi(accountId) {
  * Section 8 - Salesforce-ready payload (typed, mock, no real CRM call)
  * ========================================================================= */
 
-function buildSalesforcePayload(bundle, recs, roiResults, briefVersion) {
+function buildSalesforcePayload(bundle, recs, roiResults, briefVersion, capabilities, integrations) {
   const { account, hypotheses } = bundle;
-  const capNames = recs.filter((r) => r.capabilityId).map((r) => byId(DataStore.capabilities, r.capabilityId)).filter(Boolean).map((c) => `${c.product}: ${c.name}`);
-  const intNames = recs.filter((r) => r.integrationId).map((r) => byId(DataStore.integrations, r.integrationId)).filter(Boolean).map((i) => i.name);
+  const capNames = recs.filter((r) => r.capabilityId).map((r) => byId(capabilities, r.capabilityId)).filter(Boolean).map((c) => `${c.product}: ${c.name}`);
+  const intNames = recs.filter((r) => r.integrationId).map((r) => byId(integrations, r.integrationId)).filter(Boolean).map((i) => i.name);
   return {
     object: 'Opportunity',
     mock: true,
@@ -1954,7 +2090,9 @@ function buildSalesforcePayload(bundle, recs, roiResults, briefVersion) {
       Account_Name__c: account.name,
       Domain__c: account.domain,
       Industry__c: account.industry || null,
-      Already_Customer__c: account.alreadyCustomer,
+      // null, never false, when nothing read established customer status.
+      Already_Customer__c: account.alreadyCustomer == null ? null : account.alreadyCustomer,
+      Already_Customer_Evidence__c: account.alreadyCustomer == null ? 'unknown - not publicly confirmed' : 'from curated fixture data',
       Reliability_Hypotheses__c: hypotheses.map((h) => h.statement),
       Recommended_Capabilities__c: capNames,
       Recommended_Integrations__c: intNames,
@@ -1965,6 +2103,7 @@ function buildSalesforcePayload(bundle, recs, roiResults, briefVersion) {
       Brief_Mode__c: briefVersion ? briefVersion.mode : null,
       Matcher_Version__c: MATCHER_VERSION,
       Roi_Version__c: ROI_VERSION,
+      App_Version__c: APP_VERSION,
       Generated_At__c: nowIso(),
     },
   };
@@ -1974,16 +2113,16 @@ function buildSalesforcePayload(bundle, recs, roiResults, briefVersion) {
  * Section 9 - share mode (prospect-safe, one consolidated screen)
  * ========================================================================= */
 
-function screenShare(accountId) {
-  // Bundle, recommendations, knowledge base and ROI assumptions were all
-  // resolved by the controller (prepareShareView) before this render ran, and
-  // the share version was saved by ensureShareVersion; this function only reads.
-  const { share, shareBrief: brief } = accountViewData(accountId);
-  if (!share) return renderFailure('Account not found', 'That prospect id does not match a loaded prospect.', '#/');
+function screenShare(view) {
+  // Bundle, recommendations, knowledge base, ROI assumptions, share link and
+  // the brief version identifying this exact snapshot were all resolved by the
+  // controller (prepareAccountView) before this render ran; this function only
+  // reads its argument - it never reaches a store, directly or via a helper.
+  const { accountId, brief } = view;
   renderStepRail(null); // share mode is a single screen, not part of the AE step flow
   renderModeSwitch(accountId);
 
-  const { bundle, recommendations: recs, capabilities, integrations, assumptions } = share;
+  const { bundle, recommendations: recs, capabilities, integrations, assumptions } = view;
   const { account, evidences, hypotheses, scenarioSteps, signals } = bundle;
   const capRecs = recs.filter((r) => r.capabilityId);
   const intRecs = recs.filter((r) => r.integrationId);
@@ -2009,7 +2148,7 @@ function screenShare(accountId) {
 
     <div class="section-head"><div class="eyebrow">Scenario<span class="sep">·</span>${scenarioSteps.length} steps</div><h2>An incident, as it would run</h2><p class="small muted">Steps not tied to public evidence are marked illustrative.${account.live ? ' Named systems come from public mentions, not a confirmed inventory.' : ''}</p></div>
     <ol class="rail">
-      ${scenarioSteps.map((s) => scenarioStepHtml(s, signals, false, false, false)).join('')}
+      ${scenarioSteps.map((s) => scenarioStepHtml(s, signals, capabilities, false, false, false)).join('')}
     </ol>
 
     <div class="section-head"><div class="eyebrow">Business case<span class="sep">·</span>3 editable levers</div><h2>Illustrative business case</h2><p class="small muted">Editable - change any assumption to match reality.</p></div>
@@ -2026,13 +2165,13 @@ function screenShare(accountId) {
       <h4>Share this view</h4>
       <p class="small muted">Stable link - reopens this exact prospect-safe summary, including the ROI assumptions below.</p>
       <div class="row" style="flex-wrap:nowrap;">
-        <input id="share-url" type="text" readonly value="${escapeHtml(shareUrl(accountId, assumptions))}" class="text-input" style="font-size:13px; background:var(--white);" aria-label="Share link" />
+        <input id="share-url" type="text" readonly value="${escapeHtml(shareUrl(account, assumptions))}" class="text-input" style="font-size:13px; background:var(--white);" aria-label="Share link" />
         <button class="btn btn-primary" type="button" id="copy-share-url">Copy link</button>
       </div>
     </div>
 
     ${aboutBuildNote()}
-    <p class="tiny muted" style="margin-top:14px;">Brief v${brief ? brief.version : 1} (share)${brief ? ` · generated ${fmtDate(brief.createdAt)}` : ''} · Incident Lens is an audition build, not affiliated with incident.io.</p>
+    <p class="tiny muted" style="margin-top:14px;" id="share-version-note">Brief v${brief.version} (share) · generated ${fmtDate(brief.createdAt)} · this label names the snapshot shown above. Incident Lens is an audition build, not affiliated with incident.io.</p>
   `);
 
   setActionBar(`
@@ -2051,7 +2190,11 @@ function screenShare(accountId) {
       // Refresh every lever, not just the edited one: incidents/month feeds
       // both the downtime and the engineer-time subtotals.
       refreshRoiResultBlocks(assumptions);
-      refreshShareUrlField(accountId, assumptions);
+      refreshShareUrlField(account, assumptions);
+      // The numbers on screen are now the reader's edits, not the saved
+      // snapshot, so the label stops claiming to name them.
+      const note = document.getElementById('share-version-note');
+      if (note) note.textContent = `Edited from brief v${brief.version} (share) · these figures are your unsaved edits, not the saved snapshot. Copy the link above to keep them. Incident Lens is an audition build, not affiliated with incident.io.`;
     });
   });
 
@@ -2071,9 +2214,9 @@ function screenShare(accountId) {
 
 // Keep the share link in step with the assumptions currently on screen, so the
 // copied URL always reproduces the numbers the prospect is looking at.
-function refreshShareUrlField(accountId, assumptions) {
+function refreshShareUrlField(account, assumptions) {
   const field = document.getElementById('share-url');
-  if (field) field.value = shareUrl(accountId, assumptions);
+  if (field) field.value = shareUrl(account, assumptions);
 }
 
 /* =========================================================================
@@ -2085,14 +2228,23 @@ function refreshShareUrlField(accountId, assumptions) {
  * of truth (needed for the share mode's "stable share URL").
  * ========================================================================= */
 
+const pickerRoute = () => ({ name: 'picker', accountId: null, screen: null, query: {} });
+
 function parseRoute(hash) {
   const [path, search] = (hash || '').replace(/^#/, '').split('?');
   const query = {};
   if (search) {
-    search.split('&').forEach((pair) => {
-      const [k, v] = pair.split('=');
-      if (k) query[decodeURIComponent(k)] = decodeURIComponent(v || '');
-    });
+    // A hand-edited or truncated link can contain malformed percent-encoding
+    // ("%zz", a bare "%"), which decodeURIComponent throws a URIError on. An
+    // unreadable link is not a crash: it falls back to the picker.
+    try {
+      search.split('&').forEach((pair) => {
+        const [k, v] = pair.split('=');
+        if (k) query[decodeURIComponent(k)] = decodeURIComponent(v || '');
+      });
+    } catch {
+      return pickerRoute();
+    }
   }
   const parts = path.split('/').filter(Boolean); // e.g. ['a', '<id>', 'evidence']
   if (parts.length === 0) return { name: 'picker', accountId: null, screen: null, query };
@@ -2111,8 +2263,11 @@ function render() {
     renderLoading('Loading three cached prospects. No network after this.');
     return;
   }
+  // The catalog is the controller's read of the data store, handed to the
+  // picker rather than read from inside it.
+  const catalog = () => ({ accounts: DataStore.accounts, error: DataStore.error });
   if (state.status === 'error') {
-    screenAccountPicker();
+    screenAccountPicker(catalog());
     return;
   }
 
@@ -2121,7 +2276,7 @@ function render() {
 
   if (route.name === 'picker') {
     state.mode = 'internal';
-    screenAccountPicker();
+    screenAccountPicker(catalog());
     return;
   }
 
@@ -2130,7 +2285,7 @@ function render() {
     // A live account this browser does not hold gets a recovery offer; an
     // unknown fixture id is a genuinely broken link.
     if (route.accountId.startsWith('live_') || route.query.d) {
-      screenLiveRecovery(route);
+      screenLiveRecovery(route.accountId, recoveryDomainFor(route));
       return;
     }
     dom.steprail.hidden = true;
@@ -2147,27 +2302,27 @@ function render() {
   // (for share links) make sure a share version exists.
   hydrateRoiFromRoute(route.accountId, route.query);
   checkFixtureIntegrity(route.accountId, bundle);
-  loadAccountViewData(route.accountId);
-  if (route.screen === 'share') {
-    ensureShareVersion(route.accountId);
-    prepareShareView(route.accountId);
+  const view = prepareAccountView(route.accountId, route.screen);
+  if (!view) {
+    renderFailure('Prospect not found', 'That link does not match one of the loaded prospects.', '#/');
+    return;
   }
 
   switch (route.screen) {
     case 'evidence':
-      screenEvidence(route.accountId);
+      screenEvidence(view);
       break;
     case 'brief':
-      screenBrief(route.accountId);
+      screenBrief(view);
       break;
     case 'scenario':
-      screenScenario(route.accountId);
+      screenScenario(view);
       break;
     case 'roi':
-      screenRoi(route.accountId);
+      screenRoi(view);
       break;
     case 'share':
-      screenShare(route.accountId);
+      screenShare(view);
       break;
     default:
       location.hash = `#/a/${route.accountId}/evidence`;
@@ -2177,6 +2332,18 @@ function render() {
 function init() {
   if (dom.vMatcher) dom.vMatcher.textContent = MATCHER_VERSION;
   if (dom.vRoi) dom.vRoi.textContent = ROI_VERSION;
+
+  // The app route lives in the hash, so letting "Skip to content" navigate to
+  // #view would throw the user back to the picker. Move focus to the main
+  // region instead and leave the route exactly where it was.
+  const skipLink = document.getElementById('skip-link');
+  if (skipLink) {
+    skipLink.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      dom.view.focus({ preventScroll: true });
+      dom.view.scrollIntoView({ block: 'start', behavior: 'instant' });
+    });
+  }
 
   window.addEventListener('hashchange', render);
 

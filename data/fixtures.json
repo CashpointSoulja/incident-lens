@@ -167,7 +167,8 @@
           ],
           "actor": "system",
           "system": "AWS EC2",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-oncall-3"
         },
         {
           "order": 2,
@@ -176,7 +177,8 @@
           "personalizedFrom": [],
           "actor": "system",
           "system": "On-call rotation",
-          "origin": "hypothesis"
+          "origin": "hypothesis",
+          "capabilityId": "cap-oncall-1"
         },
         {
           "order": 3,
@@ -187,7 +189,8 @@
           ],
           "actor": "prospect",
           "system": "IBM Instana",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-inv-1"
         },
         {
           "order": 4,
@@ -199,7 +202,8 @@
           ],
           "actor": "prospect",
           "system": "AWS EC2 multi-cloud infrastructure",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-resp-1"
         },
         {
           "order": 5,
@@ -210,7 +214,8 @@
           ],
           "actor": "prospect",
           "system": "Atlassian Statuspage",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-stat-2"
         },
         {
           "order": 6,
@@ -221,7 +226,8 @@
           ],
           "actor": "prospect",
           "system": "Runbooks",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-resp-4"
         }
       ]
     },
@@ -382,7 +388,8 @@
           ],
           "actor": "system",
           "system": "Prometheus",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-oncall-3"
         },
         {
           "order": 2,
@@ -393,7 +400,8 @@
           ],
           "actor": "system",
           "system": "On-call rotation",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-oncall-1"
         },
         {
           "order": 3,
@@ -404,7 +412,8 @@
           ],
           "actor": "prospect",
           "system": "Kubernetes on AWS",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-inv-3"
         },
         {
           "order": 4,
@@ -413,7 +422,8 @@
           "personalizedFrom": [],
           "actor": "prospect",
           "system": "Slack",
-          "origin": "hypothesis"
+          "origin": "hypothesis",
+          "capabilityId": "cap-resp-1"
         },
         {
           "order": 5,
@@ -425,7 +435,8 @@
           ],
           "actor": "prospect",
           "system": "Atlassian Statuspage",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-stat-2"
         },
         {
           "order": 6,
@@ -434,7 +445,8 @@
           "personalizedFrom": [],
           "actor": "prospect",
           "system": "Public engineering blog",
-          "origin": "hypothesis"
+          "origin": "hypothesis",
+          "capabilityId": "cap-resp-4"
         }
       ]
     },
@@ -599,7 +611,8 @@
           ],
           "actor": "system",
           "system": "Internal vulnerability scanning",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-oncall-3"
         },
         {
           "order": 2,
@@ -608,7 +621,8 @@
           "personalizedFrom": [],
           "actor": "system",
           "system": "Slack",
-          "origin": "hypothesis"
+          "origin": "hypothesis",
+          "capabilityId": "cap-oncall-1"
         },
         {
           "order": 3,
@@ -619,7 +633,8 @@
           ],
           "actor": "prospect",
           "system": "Dependency analysis",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-inv-3"
         },
         {
           "order": 4,
@@ -630,7 +645,8 @@
           ],
           "actor": "prospect",
           "system": "FireHydrant in Slack",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-resp-1"
         },
         {
           "order": 5,
@@ -641,7 +657,8 @@
           ],
           "actor": "prospect",
           "system": "Atlassian Statuspage",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-stat-2"
         },
         {
           "order": 6,
@@ -652,7 +669,8 @@
           ],
           "actor": "prospect",
           "system": "Public security blog",
-          "origin": "evidence"
+          "origin": "evidence",
+          "capabilityId": "cap-resp-4"
         }
       ]
     }

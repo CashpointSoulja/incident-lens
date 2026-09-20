@@ -11,7 +11,10 @@
 <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <a class="skip-link" href="#view">Skip to content</a>
+  <!-- Focus is moved to <main> by app.js; the href is a same-document fallback
+       when scripting is unavailable. Navigation must not change the app route,
+       which lives in the same hash. -->
+  <a class="skip-link" id="skip-link" href="#view">Skip to content</a>
 
   <div class="disclaimer-ribbon" role="note">
     <span class="dot" aria-hidden="true"></span>

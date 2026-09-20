@@ -41,22 +41,72 @@ export function normalizeDomain(input) {
   if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(host)) throw new Error('Enter a public company domain, such as acme.com.');
   return host;
 }
-async function assertPublicHost(host) {
-  const rows = await lookup(host, { all: true, verbatim: true });
+// `lookupImpl` is injectable so the public-host guard can be exercised without
+// depending on live DNS; production always uses node's resolver.
+async function assertPublicHost(host, lookupImpl = lookup) {
+  const rows = await lookupImpl(host, { all: true, verbatim: true });
   if (!rows.length || rows.some((row) => isPrivateIp(row.address))) throw new Error('That domain does not resolve to a public website.');
 }
-async function fetchPage(url, fetchImpl = fetch) {
+const MAX_REDIRECTS = 5;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+// A public-host check on the first URL proves nothing about where a redirect
+// lands, so every hop is re-checked with the same guard: the protocol must stay
+// http(s) and the new host must still resolve to a public address. A hop that
+// fails is not followed at all, so a redirect can never smuggle a loopback or
+// private-network destination into the evidence.
+async function assertFetchableUrl(url, lookupImpl) {
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('Unsupported URL protocol.');
-  try { await assertPublicHost(parsed.hostname); } catch { return null; } // unresolvable or non-public host: treat as an absent page, never abort the whole lookup
+  await assertPublicHost(parsed.hostname, lookupImpl);
+  return parsed;
+}
+
+// Read at most MAX_BYTES off the wire and then stop pulling, so an endless or
+// hostile response is never buffered in full before being truncated. Falls back
+// to text() only when the response exposes no readable stream (test doubles).
+async function readCapped(res) {
+  const body = res.body;
+  if (!body || typeof body.getReader !== 'function') return String(await res.text()).slice(0, MAX_BYTES);
+  const reader = body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let out = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out += decoder.decode(value, { stream: true });
+      if (out.length >= MAX_BYTES) { out = out.slice(0, MAX_BYTES); break; }
+    }
+  } finally {
+    try { await reader.cancel(); } catch { /* already closed */ }
+  }
+  return out;
+}
+
+export async function fetchPage(url, fetchImpl = fetch, lookupImpl = lookup) {
+  try { await assertFetchableUrl(url, lookupImpl); } catch { return null; } // unresolvable, non-public or unsupported: treat as an absent page, never abort the whole lookup
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetchImpl(url, { redirect: 'follow', signal: controller.signal, headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,application/json;q=0.8' } });
-    const type = res.headers.get('content-type') || '';
-    if (!res.ok || (!type.includes('text/html') && !type.includes('application/json'))) return null;
-    const body = (await res.text()).slice(0, MAX_BYTES);
-    return { url: res.url || url, status: res.status, type, body, title: titleFromHtml(body), description: metaDescription(body), text: stripHtml(body).slice(0, 40_000) };
+    let current = url;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+      // 'manual' so this loop - not undici - decides whether a hop is allowed.
+      const res = await fetchImpl(current, { redirect: 'manual', signal: controller.signal, headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml,application/json;q=0.8' } });
+      const location = res.headers.get('location');
+      if (REDIRECT_STATUSES.has(res.status) && location) {
+        if (hop === MAX_REDIRECTS) return null; // redirect chain too long: give up rather than keep following
+        const next = new URL(location, current).toString();
+        try { await assertFetchableUrl(next, lookupImpl); } catch { return null; } // redirect destination fails the public-host guard
+        current = next;
+        continue;
+      }
+      const type = res.headers.get('content-type') || '';
+      if (!res.ok || (!type.includes('text/html') && !type.includes('application/json'))) return null;
+      const body = await readCapped(res);
+      return { url: res.url || current, status: res.status, type, body, title: titleFromHtml(body), description: metaDescription(body), text: stripHtml(body).slice(0, 40_000) };
+    }
+    return null;
   } catch { return null; } finally { clearTimeout(timer); }
 }
 function companyName(domain, home) {
@@ -68,6 +118,27 @@ function companyName(domain, home) {
   if (short && parts.length === 1) return short;
   return domainLabel.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
+/* A status page is recognized by an exact pattern, never by the word "status"
+ * appearing somewhere in a URL. Qualifying shapes:
+ *   - the `status` subdomain of the company (status.acme.com), or of any host
+ *     when no domain is supplied;
+ *   - a known hosted status-page vendor (statuspage.io, statusgator.com);
+ *   - a `/status` path at the root of the company's own site.
+ * A design studio called "Status Quo" at statusquo.example, or a marketing page
+ * at /about/status-of-the-industry, is not a status page. */
+export function isStatusPageUrl(url, domain) {
+  let parsed;
+  try { parsed = new URL(url); } catch { return false; }
+  const host = parsed.hostname.toLowerCase().replace(/^www\./, '').replace(/\.$/, '');
+  const path = parsed.pathname.toLowerCase().replace(/\/+$/, '');
+  const base = domain ? String(domain).toLowerCase().replace(/^www\./, '') : '';
+  if (host === 'statuspage.io' || host.endsWith('.statuspage.io')) return true;
+  if (host === 'statusgator.com' || host.endsWith('.statusgator.com')) return true;
+  if (base ? host === `status.${base}` : /^status\./.test(host)) return true;
+  if (path === '/status' && (base ? host === base : true)) return true;
+  return false;
+}
+
 // Evidence carries the kind of public page it came from, so downstream copy can
 // say what was actually read instead of treating every URL the same.
 export function sourceTypeForUrl(url) {
@@ -76,7 +147,7 @@ export function sourceTypeForUrl(url) {
   const host = parsed.hostname.toLowerCase();
   const path = parsed.pathname.toLowerCase();
   if (host === 'github.com' || host.endsWith('.github.com') || host.endsWith('github.io')) return 'github';
-  if (host.startsWith('status.') || host.includes('statuspage.io') || host.includes('statusgator') || /(^|\/)status(\/|$)/.test(path)) return 'status-page';
+  if (isStatusPageUrl(url)) return 'status-page';
   if (/career|jobs?(\/|$)|vacanc/.test(path) || host.includes('jobs')) return 'careers';
   if (/engineering|infrastructure|platform/.test(path)) return 'engineering';
   if (/blog|post|article|news/.test(path)) return 'blog';
@@ -95,6 +166,20 @@ function pageEvidence(accountId, page, claim, observedAt, confidence = 'high') {
     confidence,
     kind: 'observed',
   };
+}
+/* A page is attributable to this prospect when it is on their own domain (or a
+ * subdomain of it). Off-domain candidates are guesses - `github.com/<label>` is
+ * assembled from the domain label, so it may well belong to a different project
+ * entirely - and are only attributable when the page itself names the domain.
+ * A guess that fails this check is excluded from every extraction, not just from
+ * the presence card: an unrelated GitHub profile must never supply "observed"
+ * technology evidence for this account. */
+function isAttributable(page, domain) {
+  let host;
+  try { host = new URL(page.url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return false; }
+  const base = String(domain).toLowerCase();
+  if (host === base || host.endsWith(`.${base}`)) return true;
+  return String(page.text || '').toLowerCase().includes(base);
 }
 function findTechSignals(pages, accountId, observedAt) {
   const patterns = [
@@ -119,7 +204,9 @@ function findTechSignals(pages, accountId, observedAt) {
 }
 function makeHypotheses(accountId, signals) {
   const out = [];
-  const add = (statement, signal) => out.push({ id: stableId('hyp', statement), accountId, statement, evidenceIds: signal.evidenceIds, signalIds: [signal.id], status: 'hypothesis', confidence: 0.5, kind: 'inferred' });
+  // The id is scoped to the account: two companies whose captures generate the
+  // same sentence are still two distinct hypotheses.
+  const add = (statement, signal) => out.push({ id: stableId('hyp', `${accountId}|${statement}`), accountId, statement, evidenceIds: signal.evidenceIds, signalIds: [signal.id], status: 'hypothesis', confidence: 0.5, kind: 'inferred' });
   const find = (...words) => signals.find((s) => words.some((w) => s.label.toLowerCase().includes(w)));
   const oncall = find('on-call', 'incident response', 'sre');
   const infra = find('kubernetes', 'aws', 'google cloud', 'azure', 'terraform');
@@ -147,13 +234,16 @@ function makeScenario(signals) {
   // A step's origin is `evidence` only when it is personalized from a signal
   // that public evidence actually supports; everything else is a hypothesis.
   const step = (spec) => ({ ...spec, origin: spec.personalizedFrom.length ? 'evidence' : 'hypothesis' });
+  // capabilityId names the incident.io capability proposed for that moment, kept
+  // separate from `system` (what they appear to use today) - the same
+  // relationship the curated fixtures carry.
   return [
-    step({ order: 1, phase: 'alert', text: `A production service starts returning elevated errors in ${named(['kubernetes', 'aws', 'google cloud', 'azure'], 'whatever runs their production services')}.`, personalizedFrom: from(infra), actor: 'system', system: label(['kubernetes', 'aws', 'google cloud', 'azure'], 'unknown - not established publicly') }),
-    step({ order: 2, phase: 'routing', text: 'The alert is routed to the responsible on-call owner.', personalizedFrom: [], actor: 'incident.io', system: 'incident.io On-call' }),
-    step({ order: 3, phase: 'investigation', text: `The responder checks ${named(['datadog', 'grafana', 'prometheus'], 'whatever telemetry they have')}, narrowing the blast radius.`, personalizedFrom: from(obs), actor: 'prospect', system: label(['datadog', 'grafana', 'prometheus'], 'unknown - not established publicly') }),
-    step({ order: 4, phase: 'response', text: `The team mitigates the affected service${db ? ` and checks ${db.label}, also mentioned on their public pages` : ''}.`, personalizedFrom: from(db), actor: 'prospect', system: db ? db.label : 'the affected service' }),
-    step({ order: 5, phase: 'customer-update', text: 'A customer update is drafted from the confirmed incident timeline.', personalizedFrom: [], actor: 'prospect', system: 'incident.io Status Pages' }),
-    step({ order: 6, phase: 'postmortem', text: 'The team reviews the timeline and records follow-up actions.', personalizedFrom: [], actor: 'prospect', system: 'incident.io Response' }),
+    step({ order: 1, phase: 'alert', text: `A production service starts returning elevated errors in ${named(['kubernetes', 'aws', 'google cloud', 'azure'], 'whatever runs their production services')}.`, personalizedFrom: from(infra), actor: 'system', system: label(['kubernetes', 'aws', 'google cloud', 'azure'], 'unknown - not established publicly'), capabilityId: 'cap-oncall-3' }),
+    step({ order: 2, phase: 'routing', text: 'The alert is routed to the responsible on-call owner.', personalizedFrom: [], actor: 'incident.io', system: 'incident.io On-call', capabilityId: 'cap-oncall-1' }),
+    step({ order: 3, phase: 'investigation', text: `The responder checks ${named(['datadog', 'grafana', 'prometheus'], 'whatever telemetry they have')}, narrowing the blast radius.`, personalizedFrom: from(obs), actor: 'prospect', system: label(['datadog', 'grafana', 'prometheus'], 'unknown - not established publicly'), capabilityId: 'cap-inv-2' }),
+    step({ order: 4, phase: 'response', text: `The team mitigates the affected service${db ? ` and checks ${db.label}, also mentioned on their public pages` : ''}.`, personalizedFrom: from(db), actor: 'prospect', system: db ? db.label : 'the affected service', capabilityId: 'cap-resp-1' }),
+    step({ order: 5, phase: 'customer-update', text: 'A customer update is drafted from the confirmed incident timeline.', personalizedFrom: [], actor: 'prospect', system: 'incident.io Status Pages', capabilityId: 'cap-stat-2' }),
+    step({ order: 6, phase: 'postmortem', text: 'The team reviews the timeline and records follow-up actions.', personalizedFrom: [], actor: 'prospect', system: 'incident.io Response', capabilityId: 'cap-resp-4' }),
   ];
 }
 /* Capture / transform boundary ---------------------------------------------
@@ -168,14 +258,14 @@ function makeScenario(signals) {
  * researchDomain() just wires the two together, so external behaviour is
  * unchanged.
  * ------------------------------------------------------------------------- */
-async function capturePages(domain, { fetchImpl = fetch, capturedAt } = {}) {
-  const home = await fetchPage(`https://${domain}/`, fetchImpl) || await fetchPage(`http://${domain}/`, fetchImpl);
+async function capturePages(domain, { fetchImpl = fetch, lookupImpl = lookup, capturedAt } = {}) {
+  const home = await fetchPage(`https://${domain}/`, fetchImpl, lookupImpl) || await fetchPage(`http://${domain}/`, fetchImpl, lookupImpl);
   if (!home) throw new Error('The company website could not be read. Try its root domain or use a preloaded prospect.');
   const candidates = [
     `https://status.${domain}/`, `https://${domain}/status`, `https://${domain}/engineering`, `https://${domain}/blog`,
     `https://${domain}/careers`, `https://${domain}/jobs`, `https://${domain}/company/careers`, `https://github.com/${domain.split('.')[0]}`,
   ];
-  const settled = await Promise.all(candidates.map((url) => fetchPage(url, fetchImpl)));
+  const settled = await Promise.all(candidates.map((url) => fetchPage(url, fetchImpl, lookupImpl)));
   const pages = [home, ...settled.filter(Boolean)].filter((page, i, all) => all.findIndex((x) => x.url === page.url) === i);
   return { domain, pages, pagesChecked: candidates.length + 1, capturedAt };
 }
@@ -185,17 +275,22 @@ export function buildBundle({ domain, pages, pagesChecked, capturedAt }) {
   const accountId = stableId('live', domain);
   const home = pages[0];
   const name = companyName(domain, home);
-  const account = { id: accountId, domain, name, industry: null, createdAt: `${observedAt}T00:00:00Z`, alreadyCustomer: false, live: true };
+  // Nothing a public-page capture reads establishes whether this company is an
+  // incident.io customer, so the field stays null (unknown) rather than being
+  // exported as a confident "not a customer".
+  const account = { id: accountId, domain, name, industry: null, createdAt: `${observedAt}T00:00:00Z`, alreadyCustomer: null, live: true };
   const evidences = [pageEvidence(accountId, home, `${name}'s public website was read successfully${home.description ? `: “${home.description}”` : '.'}`, observedAt)];
-  const statusPage = pages.find((p) => /status/i.test(new URL(p.url).hostname + new URL(p.url).pathname) && /status|uptime|incident|operational/i.test(`${p.title} ${p.text.slice(0, 1500)}`));
+  // Only attributable pages may produce evidence of any kind for this account.
+  const owned = pages.filter((p) => isAttributable(p, domain));
+  const statusPage = owned.find((p) => isStatusPageUrl(p.url, domain) && /status|uptime|incident|operational/i.test(`${p.title} ${p.text.slice(0, 1500)}`));
   if (statusPage) evidences.push(pageEvidence(accountId, statusPage, `A public status page was found${statusPage.title ? `: “${statusPage.title}”` : '.'}`, observedAt));
-  const careersPage = pages.find((p) => /career|jobs/i.test(new URL(p.url).pathname) && /career|job|join|role|vacanc/i.test(p.text.slice(0, 5000)));
+  const careersPage = owned.find((p) => /career|jobs/i.test(new URL(p.url).pathname) && /career|job|join|role|vacanc/i.test(p.text.slice(0, 5000)));
   if (careersPage) evidences.push(pageEvidence(accountId, careersPage, `A public careers or jobs page was found${careersPage.title ? `: “${careersPage.title}”` : '.'}`, observedAt));
-  const engineeringPage = pages.find((p) => /engineering|blog/i.test(new URL(p.url).pathname) && /engineer|technical|developer|infrastructure/i.test(p.text.slice(0, 7000)));
+  const engineeringPage = owned.find((p) => /engineering|blog/i.test(new URL(p.url).pathname) && /engineer|technical|developer|infrastructure/i.test(p.text.slice(0, 7000)));
   if (engineeringPage) evidences.push(pageEvidence(accountId, engineeringPage, `A public engineering or technical page was found${engineeringPage.title ? `: “${engineeringPage.title}”` : '.'}`, observedAt));
-  const githubPage = pages.find((p) => new URL(p.url).hostname === 'github.com' && p.text.toLowerCase().includes(domain.toLowerCase()));
+  const githubPage = owned.find((p) => new URL(p.url).hostname.toLowerCase().replace(/^www\./, '') === 'github.com');
   if (githubPage) evidences.push(pageEvidence(accountId, githubPage, `A public GitHub presence linked to ${domain} was found${githubPage.title ? `: “${githubPage.title}”` : '.'}`, observedAt));
-  const discovered = findTechSignals(pages, accountId, observedAt);
+  const discovered = findTechSignals(owned, accountId, observedAt);
   evidences.push(...discovered.evidence);
   const signals = discovered.signals;
   if (statusPage) signals.unshift({ id: stableId('sig', `${accountId}|Public status page`), accountId, label: 'Public status page', evidenceIds: [evidences.find((e) => e.url === statusPage.url).id], strength: 5 });
@@ -205,8 +300,8 @@ export function buildBundle({ domain, pages, pagesChecked, capturedAt }) {
 
 // `now` is the explicit capture timestamp (Date or ISO string); it is read
 // once here and then only ever passed through, never re-read downstream.
-export async function researchDomain(input, { fetchImpl = fetch, now = new Date() } = {}) {
+export async function researchDomain(input, { fetchImpl = fetch, lookupImpl = lookup, now = new Date() } = {}) {
   const domain = normalizeDomain(input);
   const capturedAt = (now instanceof Date ? now : new Date(now)).toISOString();
-  return buildBundle(await capturePages(domain, { fetchImpl, capturedAt }));
+  return buildBundle(await capturePages(domain, { fetchImpl, lookupImpl, capturedAt }));
 }
