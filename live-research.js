@@ -31,29 +31,89 @@ function stableId(prefix, value) { return `${prefix}_${createHash('sha256').upda
 /* Any address that is not a public unicast destination, across both families.
  * IPv6 matters as much as IPv4 here: a redirect that resolves to ::1, to a
  * link-local fe80:: address, or to an IPv4-mapped form such as ::ffff:127.0.0.1
- * reaches exactly the same internal services as 127.0.0.1 does, so mapped and
- * compatible forms are decoded and re-checked as IPv4. */
+ * reaches exactly the same internal services as 127.0.0.1 does.
+ * Spelling must never decide the answer: `::ffff:127.0.0.1`, `::ffff:7f00:1`,
+ * `0::ffff:127.0.0.1` and the fully expanded `0:0:0:0:0:ffff:7f00:1` are one
+ * address, so the text is normalized to eight hextets first - every `::` is
+ * expanded and any dotted-quad tail is folded into its two hextets - and the
+ * classification then runs on the 128-bit value rather than on a pattern. */
 function isPrivateIpv4(ip) {
   return /^(?:127\.|10\.|0\.|169\.254\.|192\.168\.)/.test(ip)
     || /^172\.(?:1[6-9]|2\d|3[01])\./.test(ip)
-    || /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip);
+    || /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip)
+    || /^(?:22[4-9]|23\d)\./.test(ip) // 224.0.0.0/4 multicast
+    || /^(?:24\d|25[0-5])\./.test(ip); // 240.0.0.0/4 reserved, incl. 255.255.255.255
+}
+function ipv4ToInt(text) {
+  const parts = text.split('.');
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const octet = Number(part);
+    if (octet > 255) return null;
+    n = (n * 256) + octet;
+  }
+  return n;
+}
+function intToIpv4(n) { return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.'); }
+// -> eight 16-bit hextets, or null when the text is not a valid IPv6 address.
+function parseIpv6(ip) {
+  if (!/^[0-9a-f:.]+$/.test(ip)) return null;
+  const marker = ip.indexOf('::');
+  if (marker !== -1 && ip.indexOf('::', marker + 1) !== -1) return null; // only one run may be elided
+  const split = (text) => (text ? text.split(':') : []);
+  const head = split(marker === -1 ? ip : ip.slice(0, marker));
+  const tail = marker === -1 ? [] : split(ip.slice(marker + 2));
+  const toHextets = (parts, allowDotted) => {
+    const out = [];
+    for (let i = 0; i < parts.length; i += 1) {
+      const part = parts[i];
+      if (part.includes('.')) {
+        if (!allowDotted || i !== parts.length - 1) return null; // a dotted quad may only close the address
+        const n = ipv4ToInt(part);
+        if (n === null) return null;
+        out.push((n >>> 16) & 0xffff, n & 0xffff);
+        continue;
+      }
+      if (!/^[0-9a-f]{1,4}$/.test(part)) return null;
+      out.push(parseInt(part, 16));
+    }
+    return out;
+  };
+  const front = toHextets(head, tail.length === 0);
+  const back = toHextets(tail, true);
+  if (!front || !back) return null;
+  const filled = front.length + back.length;
+  if (marker === -1) return filled === 8 ? front : null;
+  if (filled > 7) return null; // '::' must stand for at least one elided group
+  return [...front, ...Array(8 - filled).fill(0), ...back];
 }
 export function isPrivateIp(address) {
   const ip = String(address).trim().toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
   if (!ip) return true;
-  if (!ip.includes(':')) return isPrivateIpv4(ip);
-  // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible (::a.b.c.d) forms.
-  const embedded = ip.match(/^(?:::ffff:0*:?|::)((?:\d{1,3}\.){3}\d{1,3})$/);
-  if (embedded) return isPrivateIpv4(embedded[1]);
-  // The same mapped addresses written as hex (::ffff:7f00:1).
-  const hexMapped = ip.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (hexMapped) {
-    const n = (parseInt(hexMapped[1], 16) * 65536) + parseInt(hexMapped[2], 16);
-    return isPrivateIpv4([n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.'));
+  if (!ip.includes(':')) {
+    const n = ipv4ToInt(ip);
+    // Anything that is not a well-formed dotted quad (and zero-padded octets
+    // such as 010.0.0.1) is classified from the canonical value, never from the
+    // literal text, and unparseable input fails closed.
+    return n === null ? true : isPrivateIpv4(intToIpv4(n));
   }
-  if (/^(?:0:){7}0$/.test(ip) || ip === '::' || ip === '::1' || /^(?:0:){7}1$/.test(ip)) return true;
-  if (/^fe[89ab][0-9a-f]:/.test(ip)) return true; // fe80::/10 link-local
-  if (/^f[cd][0-9a-f]{2}:/.test(ip)) return true; // fc00::/7 unique-local
+  const h = parseIpv6(ip);
+  if (!h) return true; // unparseable: never treated as a proven public destination
+  if (h.every((part) => part === 0)) return true; // :: unspecified
+  if (h.slice(0, 7).every((part) => part === 0) && h[7] === 1) return true; // ::1 loopback
+  if ((h[0] & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+  if ((h[0] & 0xfe00) === 0xfc00) return true; // fc00::/7 unique-local
+  if ((h[0] & 0xff00) === 0xff00) return true; // ff00::/8 multicast
+  if (h[0] === 0x2001 && h[1] === 0x0db8) return true; // 2001:db8::/32 documentation
+  // IPv4-mapped (::ffff:a.b.c.d), IPv4-compatible (::a.b.c.d) and IPv4-translated
+  // (::ffff:0:a.b.c.d) forms all carry a real IPv4 destination in their low 32
+  // bits, whichever way they were spelled, so that address is re-checked as v4.
+  const prefix = h.slice(0, 6);
+  const embedsIpv4 = prefix.slice(0, 4).every((part) => part === 0)
+    && [[0, 0], [0, 0xffff], [0xffff, 0]].some(([a, b]) => prefix[4] === a && prefix[5] === b);
+  if (embedsIpv4) return isPrivateIpv4(intToIpv4(((h[6] * 65536) + h[7]) >>> 0));
   return false;
 }
 /* Host/domain matching is exact or on a real subdomain boundary - never a

@@ -148,15 +148,22 @@ test('non-public addresses are rejected across both IP families', async () => {
     '10.0.0.5', '172.16.0.1', '172.31.255.255', '192.168.1.1', '127.0.0.1', '169.254.169.254', '0.0.0.0', '100.64.0.1',
     '::1', '0:0:0:0:0:0:0:1', '::', 'fe80::1', 'fe80::1%eth0', 'febf::abcd', 'fc00::1', 'fd12:3456::1',
     '::ffff:127.0.0.1', '::ffff:169.254.169.254', '::ffff:10.0.0.1', '::ffff:7f00:1', '::127.0.0.1',
+    // The spelling of a mapped address must not decide the answer: compressed,
+    // partly compressed, fully expanded and hex-embedded forms are one address.
+    '0:0:0:0:0:ffff:7f00:1', '0::ffff:127.0.0.1', '0:0:0:0:0:ffff:127.0.0.1', '::ffff:0:127.0.0.1',
+    '0:0:0:0:0:0:0:0', '0:0:0:0:0:ffff:a00:1', '::ffff:c0a8:1', '0:0:0:0:0:ffff:a9fe:a9fe',
+    'fe80:0:0:0:0:0:0:1', 'fc00:0:0:0:0:0:0:1', 'ff02::1', 'ff00::', '2001:db8::1', '2001:0db8:1234::1',
+    '224.0.0.1', '239.255.255.255', '240.0.0.1', '255.255.255.255', 'not-an-address',
   ];
   for (const address of nonPublic) assert.equal(isPrivateIp(address), true, `${address} must not count as public`);
-  for (const address of ['93.184.216.34', '8.8.8.8', '100.63.255.255', '100.128.0.1', '2606:2800:220:1:248:1893:25c8:1946', '::ffff:93.184.216.34']) {
+  for (const address of ['93.184.216.34', '8.8.8.8', '100.63.255.255', '100.128.0.1', '223.255.255.1', '2606:2800:220:1:248:1893:25c8:1946', '::ffff:93.184.216.34', '2606:4700::1111', '2606:4700:0:0:0:0:0:1111']) {
     assert.equal(isPrivateIp(address), false, `${address} is a public address`);
   }
 
   // Each family, exercised end to end through the injected resolver: a redirect
   // that lands on such an address is never requested.
-  for (const address of ['::1', 'fe80::1', '::ffff:127.0.0.1', 'fc00::1', '100.64.0.1', '::']) {
+  for (const address of ['::1', 'fe80::1', '::ffff:127.0.0.1', 'fc00::1', '100.64.0.1', '::',
+    '0:0:0:0:0:ffff:7f00:1', '::ffff:7f00:1', '0::ffff:127.0.0.1', 'ff02::1', '224.0.0.1', '240.0.0.1']) {
     const seen = [];
     const fetchImpl = async (url) => {
       seen.push(url);
@@ -166,6 +173,15 @@ test('non-public addresses are rejected across both IP families', async () => {
     const lookupImpl = async (host) => [{ address: host === 'internal.example' ? address : '93.184.216.34' }];
     assert.equal(await fetchPage('https://acme.com/', fetchImpl, lookupImpl), null, `redirect to ${address} must not be followed`);
     assert.deepEqual(seen, ['https://acme.com/'], `${address} must never be requested`);
+  }
+
+  // The guard must stay a guard, not a block: a genuinely public destination in
+  // either family is still fetched through the same injected resolver.
+  for (const address of ['93.184.216.34', '2606:4700::1111', '::ffff:93.184.216.34']) {
+    const fetchImpl = async () => htmlResponse('<title>Public</title>hello');
+    const lookupImpl = async () => [{ address }];
+    const page = await fetchPage('https://acme.com/', fetchImpl, lookupImpl);
+    assert.equal(page?.title, 'Public', `a host resolving to ${address} must still be read`);
   }
 });
 
