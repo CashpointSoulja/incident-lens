@@ -617,3 +617,16 @@ html { scroll-behavior: smooth; scroll-padding-top: 96px; }
   .live-domain-form .row { align-items: stretch; flex-direction: column; }
   .live-domain-form .btn { width: 100%; }
 }
+
+/* Narrow phones on account screens: logo, product name and AE/Share switch share one row. */
+.brand-name { white-space: nowrap; }
+@media (max-width: 420px) {
+  .header-inner:has(.mode-switch:not([hidden])) .brand-logo { height: 20px; }
+  .header-inner:has(.mode-switch:not([hidden])) .brand-name { font-size: 16px; }
+  .header-inner:has(.mode-switch:not([hidden])) .brand { gap: 8px; }
+  .mode-switch button { padding: 8px 11px; }
+}
+@media (max-width: 374px) {
+  .header-inner:has(.mode-switch:not([hidden])) .brand-divider,
+  .header-inner:has(.mode-switch:not([hidden])) .brand-text { display: none; }
+}

@@ -2008,7 +2008,7 @@ function screenRoi(view) {
     </section>
 
     <div class="row" style="margin-top:14px;">
-      <button class="btn" type="button" id="roi-reset">Reset to fixture baseline</button>
+      <button class="btn" type="button" id="roi-reset">Reset to baseline</button>
     </div>
   `);
 
@@ -2038,7 +2038,7 @@ function screenRoi(view) {
   document.getElementById('roi-reset').addEventListener('click', () => {
     // The reset itself is a controller action; the screen just re-renders.
     resetRoiAssumptions(accountId);
-    showToast('ROI assumptions reset to the fixture baseline.');
+    showToast('ROI assumptions reset to the baseline.');
     render();
   });
 }
