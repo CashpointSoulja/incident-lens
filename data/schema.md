@@ -1,4 +1,4 @@
-# Data model (JSON fixtures + runtime)
+# Data schema (JSON fixtures + runtime)
 Account { id, domain, name, industry?, createdAt, alreadyCustomer: true|false|null (null = unknown; a live public-page lookup cannot establish it, so it is never exported as false), live: bool }
 Evidence { id, accountId, claim, url, sourceTitle (title the page gave itself, "" when unknown), sourceType: status-page|careers|engineering|blog|github|homepage|other (inferred from the url), observedAt, confidence: high|medium|low, kind: observed|inferred }
 Signal { id, accountId, label, evidenceIds[], strength: 1-5 }

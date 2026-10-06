@@ -1,15 +1,15 @@
 // Incident Lens - app.js
-// Audition build - not affiliated with incident.io.
+// Independent concept by Ayo Ahmed. Not affiliated with incident.io.
 //
 // Architecture (mirrors PRD section 5 + section 7):
 //  1. Data access  - fetch fixtures/kb once at startup, no network after that.
-//  2. Models       - factories that mirror data/schema.md 1:1.
+//  2. Records      - factories that mirror data/schema.md 1:1.
 //  3. Deterministic core - Matcher (product/integration recommendations) and
 //     Roi (business case math) are pure functions with no DOM/state access.
-//     There are no model-call paths in this build; anything AI would touch
-//     (extraction/summarization/question drafting) is precomputed into the
-//     fixtures, so the deterministic core is the only thing that decides
-//     recommendations or numbers.
+//     Nothing generative runs in this build: preloaded fixtures are fixed
+//     data and live lookups are rule-based extraction from public pages, so
+//     the deterministic core is the only thing that decides recommendations
+//     or numbers.
 //  4. State + Storage - single mutable state object, localStorage-backed
 //     feedback/event trail.
 //  5. Screens - pure-ish render(state) -> html string functions, one per
@@ -21,13 +21,15 @@
 
 'use strict';
 
+import { shareHash, parseRoute, applyRoiPayload } from './share-link.js';
+
 /* =========================================================================
- * Section 1 - constants, utils, storage, models, data loading
+ * Section 1 - constants, utils, storage, records, data loading
  * ========================================================================= */
 
 const MATCHER_VERSION = 'matcher-v1.0';
 const ROI_VERSION = 'roi-v1.0';
-const APP_VERSION = 'incident-lens-audition-0.1.0';
+const APP_VERSION = 'incident-lens-1.0.0';
 
 const DATA_URLS = {
   fixtures: './data/fixtures.json',
@@ -129,7 +131,7 @@ const Storage = {
   },
 };
 
-/* ---------- models (mirror data/schema.md 1:1) ---------- */
+/* ---------- records (mirror data/schema.md 1:1) ---------- */
 
 // Closed vocabularies from data/schema.md. Anything outside them is coerced to
 // the neutral member rather than silently carried through.
@@ -150,7 +152,7 @@ const SOURCE_TYPE_LABEL = {
   blog: 'Blog post', github: 'GitHub', homepage: 'Company homepage', other: 'Public page',
 };
 
-const Models = {
+const Records = {
   account(a) {
     return {
       id: a.id,
@@ -437,8 +439,8 @@ const DataStore = {
       if (!fixtures.length) throw new Error('fixtures.json contained no fixtures');
 
       DataStore.accounts = fixtures.map((fx) => DataStore.normalizeBundle(fx));
-      DataStore.capabilities = (kbJson.capabilities || []).map(Models.capability);
-      DataStore.integrations = (kbJson.integrations || []).map(Models.integration);
+      DataStore.capabilities = (kbJson.capabilities || []).map(Records.capability);
+      DataStore.integrations = (kbJson.integrations || []).map(Records.integration);
       DataStore.hydrateLiveBundles();
 
       DataStore.status = 'ready';
@@ -451,11 +453,11 @@ const DataStore = {
 
   normalizeBundle(fx) {
     return {
-      account: Models.account(fx.account),
-      evidences: (fx.evidences || []).map(Models.evidence),
-      signals: (fx.signals || []).map(Models.signal),
-      hypotheses: (fx.hypotheses || []).map(Models.hypothesis),
-      scenarioSteps: (fx.scenarioSteps || []).map(Models.scenarioStep).sort((a, b) => a.order - b.order),
+      account: Records.account(fx.account),
+      evidences: (fx.evidences || []).map(Records.evidence),
+      signals: (fx.signals || []).map(Records.signal),
+      hypotheses: (fx.hypotheses || []).map(Records.hypothesis),
+      scenarioSteps: (fx.scenarioSteps || []).map(Records.scenarioStep).sort((a, b) => a.order - b.order),
       research: fx.research || null,
     };
   },
@@ -489,8 +491,7 @@ const DataStore = {
  * Section 2 - deterministic core: Matcher + Roi
  * These are pure functions: (data in) -> (data out), no DOM, no storage,
  * no fetch. Every recommendation and every ROI number must be traceable
- * back to a rule/formula defined here. Nothing here calls a model; a model
- * is not used anywhere in this build, only precomputed fixture content.
+ * back to a rule/formula defined here. Nothing generative runs here.
  * ========================================================================= */
 
 const Matcher = {
@@ -516,7 +517,7 @@ const Matcher = {
       id: 'rule-generalist-team',
       test: (label) => label.includes('generalist') || label.includes('fullstack engineering'),
       capabilityIds: ['cap-inv-1', 'cap-nexus-1'],
-      reason: (label) => `Team is described as generalist rather than dedicated SRE (signal: "${label}"), so an AI-drafted root-cause hypothesis and a conversational assistant reduce the specialist knowledge an on-call generalist needs on the spot.`,
+      reason: (label) => `Team is described as generalist rather than dedicated SRE (signal: "${label}"), so an automatically drafted root-cause hypothesis and a conversational assistant reduce the specialist knowledge an on-call generalist needs on the spot.`,
     },
     {
       id: 'rule-dedicated-oncall-team',
@@ -602,13 +603,13 @@ const Matcher = {
     integrations.forEach((integration) => {
       if (integration.name.toLowerCase() === account.name.toLowerCase()) return;
       // The integration's own name plus its declared signal phrases ("amazon web
-      // services" for AWS): that list is the modeled link between an Integration
+      // services" for AWS): that list is the declared link between an Integration
       // and the Signals/Evidence that indicate it. Still an exact word match -
       // nothing is inferred beyond the phrase appearing in their own evidence.
       const patterns = [integration.name, ...integration.signalPatterns].map(wordRe);
       const hit = haystacks.find((h) => patterns.some((re) => re.test(h.text)));
       if (!hit) return;
-      recs.push(Models.recommendation({
+      recs.push(Records.recommendation({
         accountId: account.id,
         integrationId: integration.id,
         ruleId: 'rule-mentioned-in-evidence',
@@ -631,7 +632,7 @@ const Matcher = {
         rule.capabilityIds.forEach((capId) => {
           const capability = byId(capabilities, capId);
           if (!capability) return;
-          recs.push(Models.recommendation({
+          recs.push(Records.recommendation({
             accountId: account.id,
             capabilityId: capId,
             ruleId: rule.id,
@@ -680,7 +681,7 @@ const Roi = {
     const scale = industry.includes('bank') ? 1.6 : industry.includes('cloud') ? 1.3 : 1;
     // Every assumption is scoped to the account so its id is content-derived
     // (account + key + lever) rather than clock/counter based.
-    const assumption = (spec) => Models.roiAssumption({ ...spec, accountId });
+    const assumption = (spec) => Records.roiAssumption({ ...spec, accountId });
     return [
       assumption({
         key: 'incidentsPerMonth', label: 'Incidents per month', value: Math.round(4 * scale), unit: 'incidents',
@@ -925,31 +926,6 @@ function ensureRoiState(accountId) {
  * unparseable params fall back to the fixture baseline.
  * ------------------------------------------------------------------------- */
 
-const RoiUrl = {
-  encode(assumptions) {
-    return assumptions.map((a) => `${a.key}:${a.value}`).join(';');
-  },
-  decode(raw) {
-    const out = {};
-    String(raw || '').split(';').forEach((pair) => {
-      const [key, value] = pair.split(':');
-      const n = toNumber(value, null);
-      if (key && n != null) out[key] = n;
-    });
-    return out;
-  },
-};
-
-// Live share links carry the researched domain as well as the ROI assumptions:
-// a live account id is a hash, so without the domain a recipient who has never
-// run that lookup has nothing to re-run. Both helpers take the account object
-// they describe, so a render can build a link from the view state it was handed
-// instead of looking the account up in DataStore.
-function shareHash(account, assumptions) {
-  const domainParam = account.live ? `&d=${encodeURIComponent(account.domain)}` : '';
-  return `#/a/${account.id}/share?roi=${encodeURIComponent(RoiUrl.encode(assumptions))}${domainParam}`;
-}
-
 function shareUrl(account, assumptions) {
   return `${location.origin}${location.pathname}${location.search}${shareHash(account, assumptions)}`;
 }
@@ -968,13 +944,7 @@ function hydrateRoiFromRoute(accountId, query) {
   if (known && (!payload || state.roiHydrated[accountId] === payload)) return ensureRoiState(accountId);
   const bundle = DataStore.getAccountBundle(accountId);
   if (!bundle) return ensureRoiState(accountId);
-  const assumptions = Roi.baselineAssumptions(bundle);
-  const overrides = RoiUrl.decode(payload);
-  assumptions.forEach((a) => {
-    if (Object.prototype.hasOwnProperty.call(overrides, a.key)) {
-      a.value = clamp(overrides[a.key], a.min, Infinity);
-    }
-  });
+  const assumptions = applyRoiPayload(Roi.baselineAssumptions(bundle), payload);
   state.roiByAccount[accountId] = { assumptions };
   state.roiHydrated[accountId] = payload;
   return state.roiByAccount[accountId];
@@ -1091,7 +1061,7 @@ function saveVersion(accountId, mode, opts) {
   const bundle = DataStore.getAccountBundle(accountId);
   const content = o.content
     || (bundle ? buildBriefContent(bundle, Matcher.buildRecommendations(bundle, DataStore.capabilities, DataStore.integrations), DataStore.capabilities, DataStore.integrations) : null);
-  const brief = Models.briefVersion({
+  const brief = Records.briefVersion({
     accountId,
     version: BriefVersionStore.nextVersionNumber(accountId, mode),
     mode,
@@ -1168,7 +1138,7 @@ async function runLiveResearch(rawDomain) {
 
 function recordFeedback(accountId, briefId, useful, recommendationId) {
   const recId = recommendationId || null;
-  const fb = FeedbackStore.add(Models.feedbackEvent({ briefId, recommendationId: recId, useful }));
+  const fb = FeedbackStore.add(Records.feedbackEvent({ briefId, recommendationId: recId, useful }));
   recordEvent(recId ? 'recommendation-feedback' : 'feedback', { accountId, useful, briefId, recommendationId: recId });
   return fb;
 }
@@ -1594,7 +1564,7 @@ function recommendationCard(rec, capabilities, integrations, evidences, opts) {
   const desc = capability ? capability.description : `Official incident.io integration (${integration.category}).`;
   const sourceUrl = capability ? capability.sourceUrl : integration.sourceUrl;
   const supporting = rec.evidenceIds.map((id) => byId(evidences, id)).filter(Boolean);
-  // An integration is modeled as feeding specific capabilities, so the card says
+  // An integration is declared as feeding specific capabilities, so the card says
   // which ones rather than leaving the relationship implicit.
   const feeds = integration ? integration.capabilityIds.map((id) => byId(capabilities, id)).filter(Boolean) : [];
   return `
@@ -2171,7 +2141,7 @@ function screenShare(view) {
     </div>
 
     ${aboutBuildNote()}
-    <p class="tiny muted" style="margin-top:14px;" id="share-version-note">Brief v${brief.version} (share) · generated ${fmtDate(brief.createdAt)} · this label names the snapshot shown above. Incident Lens is an audition build, not affiliated with incident.io.</p>
+    <p class="tiny muted" style="margin-top:14px;" id="share-version-note">Brief v${brief.version} (share) · generated ${fmtDate(brief.createdAt)} · this label names the snapshot shown above. Independent concept by Ayo Ahmed. Not affiliated with incident.io.</p>
   `);
 
   setActionBar(`
@@ -2194,7 +2164,7 @@ function screenShare(view) {
       // The numbers on screen are now the reader's edits, not the saved
       // snapshot, so the label stops claiming to name them.
       const note = document.getElementById('share-version-note');
-      if (note) note.textContent = `Edited from brief v${brief.version} (share) · these figures are your unsaved edits, not the saved snapshot. Copy the link above to keep them. Incident Lens is an audition build, not affiliated with incident.io.`;
+      if (note) note.textContent = `Edited from brief v${brief.version} (share) · these figures are your unsaved edits, not the saved snapshot. Copy the link above to keep them. Independent concept by Ayo Ahmed. Not affiliated with incident.io.`;
     });
   });
 
@@ -2227,33 +2197,6 @@ function refreshShareUrlField(account, assumptions) {
  * except through location.hash / <a href> so the URL is always the source
  * of truth (needed for the share mode's "stable share URL").
  * ========================================================================= */
-
-const pickerRoute = () => ({ name: 'picker', accountId: null, screen: null, query: {} });
-
-function parseRoute(hash) {
-  const [path, search] = (hash || '').replace(/^#/, '').split('?');
-  const query = {};
-  if (search) {
-    // A hand-edited or truncated link can contain malformed percent-encoding
-    // ("%zz", a bare "%"), which decodeURIComponent throws a URIError on. An
-    // unreadable link is not a crash: it falls back to the picker.
-    try {
-      search.split('&').forEach((pair) => {
-        const [k, v] = pair.split('=');
-        if (k) query[decodeURIComponent(k)] = decodeURIComponent(v || '');
-      });
-    } catch {
-      return pickerRoute();
-    }
-  }
-  const parts = path.split('/').filter(Boolean); // e.g. ['a', '<id>', 'evidence']
-  if (parts.length === 0) return { name: 'picker', accountId: null, screen: null, query };
-  if (parts[0] === 'a' && parts[1]) {
-    const screen = parts[2] || 'evidence';
-    return { name: 'account', accountId: parts[1], screen, query };
-  }
-  return { name: 'picker', accountId: null, screen: null, query };
-}
 
 function render() {
   if (state.status === 'loading') {

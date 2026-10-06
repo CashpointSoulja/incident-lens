@@ -1,5 +1,10 @@
 import { lookup } from 'node:dns/promises';
+import { lookup as lookupCallback } from 'node:dns';
 import { createHash } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { Readable } from 'node:stream';
+import { createGunzip, createInflate, createBrotliDecompress } from 'node:zlib';
 
 const UA = 'IncidentLens/1.0 (+https://github.com/CashpointSoulja/incident-lens)';
 const TIMEOUT_MS = 6500;
@@ -12,7 +17,32 @@ function stripHtml(html = '') {
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#39;/gi, "'")
-    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&nbsp;/gi, ' '));
+    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&nbsp;/gi, ' ')
+    .replace(/&#x([0-9a-f]{1,6});/gi, (m, hex) => safeCodePoint(parseInt(hex, 16), m))
+    .replace(/&#(\d{1,7});/g, (m, dec) => safeCodePoint(Number(dec), m)));
+}
+function safeCodePoint(n, fallback) {
+  return Number.isInteger(n) && n > 0 && n <= 0x10ffff && !(n >= 0xd800 && n <= 0xdfff) ? String.fromCodePoint(n) : fallback;
+}
+// Readable prose blocks for quoting. Navigation, headers, footers, forms and
+// inline SVG are dropped and every block-level boundary becomes a break, so a
+// quote can never be stitched together from menu labels and button text.
+const BLOCK_TAGS = /<\/?(?:p|div|li|ul|ol|h[1-6]|section|article|aside|blockquote|br|tr|td|th|dd|dt|figcaption|main|button)\b[^>]*>/gi;
+export function proseBlocks(html = '') {
+  const cleaned = String(html)
+    .replace(/<(script|style|svg|noscript|nav|header|footer|form|template|iframe)\b[^>]*>[\s\S]*?<\/\1>/gi, '\n')
+    .replace(BLOCK_TAGS, '\n');
+  return cleaned.split('\n').map((chunk) => stripHtml(chunk)).filter(Boolean);
+}
+// A quotable sentence is real prose: 25-300 characters, at least six words,
+// mostly lowercase words, and closed by sentence punctuation.
+export function isProseSentence(sentence) {
+  const s = compact(sentence);
+  if (s.length < 25 || s.length > 300 || !/[.!?]["”']?$/.test(s)) return false;
+  const words = s.split(' ');
+  if (words.length < 6) return false;
+  const capitalised = words.filter((w) => /^[A-Z]/.test(w)).length;
+  return capitalised / words.length <= 0.5;
 }
 function titleFromHtml(html = '') {
   const match = String(html).match(/<title[^>]*>([\s\S]*?)<\/title>/i);
@@ -156,6 +186,10 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 async function assertFetchableUrl(url, lookupImpl) {
   const parsed = new URL(url);
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('Unsupported URL protocol.');
+  // Only the default web ports: a redirect to a public host on :22 or :6379 is
+  // still a request this tool has no business making.
+  if (parsed.port !== '') throw new Error('Non-default ports are not fetched.');
+  if (parsed.username || parsed.password) throw new Error('URLs with credentials are not fetched.');
   await assertPublicHost(parsed.hostname, lookupImpl);
   return parsed;
 }
@@ -196,7 +230,62 @@ async function readCapped(res) {
   return decodeCapped(Buffer.concat(chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.length)), received));
 }
 
-export async function fetchPage(url, fetchImpl = fetch, lookupImpl = lookup) {
+/* DNS pinning. Checking a host's addresses and then letting fetch resolve it
+ * again leaves a window in which a short-TTL record can flip to 127.0.0.1
+ * (DNS rebinding). guardedLookup runs inside the socket connect itself, so the
+ * address that is checked is the address that is dialled. */
+export function guardedLookup(hostname, options, callback) {
+  const opts = typeof options === 'function' ? {} : (options || {});
+  const cb = typeof options === 'function' ? options : callback;
+  lookupCallback(hostname, { ...opts, all: true, verbatim: true }, (error, rows) => {
+    if (error) return cb(error);
+    if (!rows.length || rows.some((row) => isPrivateIp(row.address))) {
+      const blocked = new Error('Blocked a non-public address at connect time.');
+      blocked.code = 'EBLOCKED';
+      return cb(blocked);
+    }
+    if (opts.all) return cb(null, rows);
+    return cb(null, rows[0].address, rows[0].family);
+  });
+}
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
+// A fetch-compatible single request (no redirect following) over node:http(s)
+// with guardedLookup as the resolver. Returns a standard Response.
+export function guardedFetch(url, { signal, headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const send = target.protocol === 'https:' ? httpsRequest : httpRequest;
+    const req = send(target, {
+      method: 'GET',
+      lookup: guardedLookup,
+      signal,
+      headers: { ...headers, 'accept-encoding': 'gzip, deflate, br' },
+    }, (res) => {
+      const responseHeaders = new Headers();
+      for (const [key, value] of Object.entries(res.headers)) {
+        if (value !== undefined) responseHeaders.set(key, Array.isArray(value) ? value.join(', ') : String(value));
+      }
+      const status = res.statusCode || 502;
+      if (NULL_BODY_STATUSES.has(status) || (status >= 300 && status < 400)) {
+        res.resume();
+        return resolve(new Response(null, { status: status < 200 ? 502 : status, headers: responseHeaders }));
+      }
+      const encoding = String(res.headers['content-encoding'] || '').toLowerCase();
+      let stream = res;
+      if (encoding === 'gzip' || encoding === 'x-gzip') stream = res.pipe(createGunzip());
+      else if (encoding === 'deflate') stream = res.pipe(createInflate());
+      else if (encoding === 'br') stream = res.pipe(createBrotliDecompress());
+      responseHeaders.delete('content-encoding');
+      responseHeaders.delete('content-length');
+      stream.on('error', () => {});
+      resolve(new Response(Readable.toWeb(stream), { status, headers: responseHeaders }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+export async function fetchPage(url, fetchImpl = guardedFetch, lookupImpl = lookup) {
   try { await assertFetchableUrl(url, lookupImpl); } catch { return null; } // unresolvable, non-public or unsupported: treat as an absent page, never abort the whole lookup
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -216,7 +305,7 @@ export async function fetchPage(url, fetchImpl = fetch, lookupImpl = lookup) {
       const type = res.headers.get('content-type') || '';
       if (!res.ok || (!type.includes('text/html') && !type.includes('application/json'))) return null;
       const body = await readCapped(res);
-      return { url: res.url || current, status: res.status, type, body, title: titleFromHtml(body), description: metaDescription(body), text: stripHtml(body).slice(0, 40_000) };
+      return { url: res.url || current, status: res.status, type, body, title: titleFromHtml(body), description: metaDescription(body), text: stripHtml(body).slice(0, 40_000), blocks: proseBlocks(body).slice(0, 2000) };
     }
     return null;
   } catch { return null; } finally { clearTimeout(timer); }
@@ -305,8 +394,10 @@ function findTechSignals(pages, accountId, observedAt) {
   for (const [label, re] of patterns) {
     const page = pages.find((p) => re.test(p.text));
     if (!page) continue;
-    const sentences = page.text.split(/(?<=[.!?])\s+/);
-    const sentence = sentences.find((s) => re.test(s) && s.length >= 25 && s.length <= 300);
+    // Quote only a real prose sentence that literally appears on the page;
+    // otherwise the claim says the term is mentioned and nothing more.
+    const blocks = Array.isArray(page.blocks) ? page.blocks : [page.text];
+    const sentence = blocks.flatMap((b) => b.split(/(?<=[.!?])\s+/)).find((s) => re.test(s) && isProseSentence(s));
     const claim = sentence ? `${label} is mentioned publicly: “${sentence.slice(0, 220)}${sentence.length > 220 ? '…' : ''}”` : `${label} is mentioned on this public page.`;
     const ev = pageEvidence(accountId, page, claim, observedAt, 'medium');
     evidence.push(ev);
@@ -383,6 +474,25 @@ async function capturePages(domain, { fetchImpl = fetch, lookupImpl = lookup, ca
   return { domain, pages, pagesChecked: candidates.length + 1, capturedAt };
 }
 
+/* Honesty invariant: an "observed" card must point at a page that was actually
+ * read, and any quoted text must appear verbatim on that page. Signals and
+ * hypotheses may only cite evidence that exists. Violations are bugs, so the
+ * lookup fails closed rather than shipping an unsourced claim. */
+function assertSourced({ pages, evidences, signals, hypotheses }) {
+  const read = new Map(pages.map((p) => [p.url, p]));
+  const ids = new Set(evidences.map((e) => e.id));
+  for (const e of evidences) {
+    const page = read.get(e.url);
+    if (e.kind !== 'observed' || !page) throw new Error('Unsourced claim blocked.');
+    const quote = e.claim.match(/“([^”]*?)(?:…)?”/);
+    if (quote && !compact(`${page.text} ${page.description || ''} ${page.title || ''}`).includes(quote[1].replace(/…$/, ''))) throw new Error('Unsourced quote blocked.');
+  }
+  for (const item of [...signals, ...hypotheses]) {
+    if (!item.evidenceIds.length || item.evidenceIds.some((id) => !ids.has(id))) throw new Error('Unsupported inference blocked.');
+  }
+  for (const h of hypotheses) if (h.kind !== 'inferred' || h.status !== 'hypothesis') throw new Error('Hypothesis mislabelled.');
+}
+
 export function buildBundle({ domain, pages, pagesChecked, capturedAt }) {
   const observedAt = String(capturedAt).slice(0, 10);
   const accountId = stableId('live', domain);
@@ -411,6 +521,7 @@ export function buildBundle({ domain, pages, pagesChecked, capturedAt }) {
   const signals = discovered.signals;
   if (statusPage) signals.unshift({ id: stableId('sig', `${accountId}|Public status page`), accountId, label: 'Public status page', evidenceIds: [evidences.find((e) => e.url === statusPage.url).id], strength: 5 });
   const hypotheses = makeHypotheses(accountId, signals);
+  assertSourced({ pages, evidences, signals, hypotheses });
   return { account, evidences, signals, hypotheses, scenarioSteps: makeScenario(signals), research: { live: true, pagesChecked, pagesRead: pages.length, observedAt, capturedAt } };
 }
 
