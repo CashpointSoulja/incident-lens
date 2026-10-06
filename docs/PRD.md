@@ -27,10 +27,9 @@ Secondary user: the prospect who receives the share link. They see evidence, hyp
 
 ## 3. Jobs to be done
 
-- When I am preparing for a first call with a technical prospect, I want to see what is publicly known about how they handle incidents, so I can open with something specific instead of "tell me about your stack".
-- When I propose an incident.io product, I want the reason and the source next to it, so I never claim something I cannot back up.
-- When a prospect asks "what is this worth to us?", I want a business case whose assumptions we can change together, so the number belongs to both of us.
-- When I hand an account to a colleague or a prospect, I want one link that reopens exactly what I was looking at.
+The job stories, forces on switching and hiring criteria are in [JTBD](JTBD.md). Personas for the AE, BDR, CSM, marketer and RevOps owner are in [Personas](PERSONAS.md).
+
+Core job: walk into a conversation with a technical prospect already knowing, from evidence I can defend, how they handle incidents today and where incident.io could help.
 
 ## 4. Five Whys
 
@@ -94,4 +93,4 @@ Non-goals:
 
 ## 9. Related documents
 
-[Design](DESIGN.md) · [Honesty model](HONESTY-MODEL.md) · [Risks](RISKS.md) · [Roadmap](ROADMAP.md) · [Decision log](DECISIONS.md) · [Test plan](TEST-PLAN.md) · [Test results](TEST-RESULTS.md) · [Runbook](RUNBOOK.md) · [ELI5 and 30-second pitch](ELI5.md) · [First 30 days](FIRST-30-DAYS.md)
+[JTBD](JTBD.md) · [Personas](PERSONAS.md) · [User stories](USER-STORIES.md) · [Service blueprint](SERVICE-BLUEPRINT.md) · [Data dictionary](DATA-DICTIONARY.md) · [Rollout](ROLLOUT.md) · [Viability memo](VIABILITY.md) · [Design](DESIGN.md) · [Honesty model](HONESTY-MODEL.md) · [Risks](RISKS.md) · [Roadmap](ROADMAP.md) · [Decision log](DECISIONS.md) · [Test plan](TEST-PLAN.md) · [Test results](TEST-RESULTS.md) · [Runbook](RUNBOOK.md) · [ELI5 and 30-second pitch](ELI5.md) · [First 30 days](FIRST-30-DAYS.md)

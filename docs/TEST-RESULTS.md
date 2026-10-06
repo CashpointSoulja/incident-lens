@@ -63,7 +63,7 @@ These runs used a 390×844 viewport and a 1366×900 viewport.
 - `incidentsPerMonth` was edited to 25, and the total read `$73,565/mo`, `$882,780 a year`.
 - In share mode the total matched (`match true`). The share URL carried `roi=incidentsPerMonth:25;…&d=incident.io`.
 - A fresh browser opened the share URL with no stored state. It showed the recovery form, then the same total (`match true`) with `incidentsPerMonth` still 25.
-- All 4 preloaded example links rendered.
+- The picker rendered 4 account links (3 preloaded examples plus the saved live account), and they opened.
 - Console and page errors: none (`errors []`).
 
 ## Visual checks

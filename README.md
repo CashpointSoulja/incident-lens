@@ -20,7 +20,7 @@
 4. **ROI.** Three levers and seven editable assumptions, with the formula shown next to every result. The numbers are illustrative and are never presented as a promise.
 5. **Share mode.** A prospect-safe view: internal notes are removed, hypotheses become questions, and sources stay. The share link carries the exact ROI values and the researched domain, so the prospect sees the same numbers the AE saw.
 
-Four preloaded examples work without the network.
+Three preloaded examples (Starling Bank, Monzo, Snyk) work without the network.
 
 ## Safety and honesty
 
@@ -44,17 +44,31 @@ Deploys to Vercel on push to `main` (`vercel.json`).
 
 ## Docs
 
+Product (PM package):
+
 | | |
 | --- | --- |
-| [PRD](docs/PRD.md) | Problem, users (AEs, BDRs, CS, marketing), JTBD, 5 Whys, scope and non-goals, success metrics |
+| [PRD](docs/PRD.md) | Problem statement, users, 5 Whys, solution, scope and non-goals, success metrics, definition of done |
+| [Jobs to be done](docs/JTBD.md) | Core job, job stories, forces on switching, hiring criteria |
+| [Personas](docs/PERSONAS.md) | AE, BDR, CSM, marketer, RevOps owner |
+| [User stories](docs/USER-STORIES.md) | Stories with acceptance criteria and test links |
+| [Service blueprint](docs/SERVICE-BLUEPRINT.md) | Front stage, back stage, systems, failure points |
+| [Data dictionary](docs/DATA-DICTIONARY.md) | Every field of the evidence, signal, hypothesis, scenario, ROI, share and CRM payloads |
 | [Honesty model](docs/HONESTY-MODEL.md) | Observed vs inferred vs unknown, and how it is enforced |
-| [Design](docs/DESIGN.md) | Brand research and the visual system |
 | [Risks](docs/RISKS.md) | Risks and mitigations |
 | [Roadmap](docs/ROADMAP.md) | V2 |
 | [Decision log](docs/DECISIONS.md) | Decisions and the reasons for them |
+| [Rollout plan](docs/ROLLOUT.md) | Pilot, adoption, support, kill switch |
+| [Viability memo](docs/VIABILITY.md) | Why this tool and why the Product Engineer - GTM role |
+| [ELI5 + 30-second pitch](docs/ELI5.md) | Plain-language explanation |
+
+Engineering and operations:
+
+| | |
+| --- | --- |
+| [Design](docs/DESIGN.md) | Brand research and the visual system |
 | [Test plan](docs/TEST-PLAN.md) / [Test results](docs/TEST-RESULTS.md) | What is tested, and actual runs with their numbers |
 | [Runbook](docs/RUNBOOK.md) | Architecture, health checks, failure modes, debugging, rollback |
-| [ELI5 + 30-second pitch](docs/ELI5.md) | Plain-language explanation |
 | [First 30 days as Product Engineer - GTM](docs/FIRST-30-DAYS.md) | How this tool would be owned in production |
 
 ## Limitations
