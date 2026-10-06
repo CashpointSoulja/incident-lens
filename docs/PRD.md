@@ -47,7 +47,7 @@ Root cause addressed by Incident Lens: research output is not a trustworthy, sha
 
 1. **Domain input.** Enter a company domain. The server reads up to nine public routes: homepage, status page candidates, engineering blog, careers and GitHub.
 2. **Evidence ledger.** Each card is a claim, its source URL and title, the date observed, confidence and an "Observed" chip. Quotes are verbatim sentences from the page.
-3. **Brief.** Signals (for example "Datadog", "Public status page", "SRE / platform team") become up to three hypotheses, each labelled "Hypothesis", carrying a confidence value and the evidence it rests on, plus discovery questions and an incident.io product and integration map with a stated reason per recommendation.
+3. **Brief.** Signals (for example "Datadog", "Public status page", "SRE / platform team") become up to three hypotheses, each marked "Inferred", worded as "might" or "could", shown with the evidence it rests on and carrying a confidence value below 1, plus discovery questions and an incident.io product and integration map with a stated reason per recommendation.
 4. **Scenario.** A six-step simulated incident (alert, routing, investigation, response, customer update, post-mortem) personalised to observed signals, and marked where it relies on a hypothesis.
 5. **ROI.** Three levers (downtime, engineer time, tool consolidation) with seven editable assumptions and visible formulas. Totals are labelled illustrative.
 6. **Share mode.** One tap to a prospect-safe view; a stable link carries the ROI assumptions and, for live lookups, the domain.

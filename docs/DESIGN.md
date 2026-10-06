@@ -32,7 +32,7 @@ Fonts are self-hosted from `public/fonts/` so the page renders the same everywhe
 | `--cream` | `#F1EBE2` | Quiet surfaces, chips |
 | `--sand` | `#E4D9C8` | Borders, rails, dividers |
 
-Rule of thumb: if everything is orange, nothing is urgent. Status is never shown by colour alone; every chip also carries a word ("Observed", "Hypothesis", "High confidence").
+Rule of thumb: if everything is orange, nothing is urgent. Status is never shown by colour alone; every chip also carries a word ("Observed", "Inferred", "High confidence").
 
 ## Layout
 

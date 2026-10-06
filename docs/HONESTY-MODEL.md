@@ -7,12 +7,12 @@ A seller who repeats a wrong "fact" to a prospect loses the deal's trust. Incide
 | State | Meaning | How it is shown |
 | --- | --- | --- |
 | Observed | A public page that was fetched today says this. The card links to that page and shows the date | "Observed" chip, source link, date |
-| Hypothesis | A reasonable inference from one or more observed cards. Never presented as fact | "Hypothesis" label, confidence as a percentage, the evidence it rests on; in share mode phrased as a question |
+| Hypothesis | A reasonable inference from one or more observed cards. Never presented as fact | "Inferred" chip, hedged wording ("might", "could"), the supporting evidence and its source link; a confidence value below 1 travels with it in the data and CRM payload; in share mode phrased as a question |
 | Unknown | Not established by public pages | Shown as unknown. For example "Customer status not publicly confirmed" - a live lookup never claims an account is or is not a customer |
 
 ## Rules
 
-1. An observed card must cite a page that was actually read in this lookup. Search-result snippets, model output or memory are never used.
+1. An observed card must cite a page that was actually read in this lookup. Search-result snippets, generated text and memory are never used.
 2. A quote must be a verbatim sentence from the page body. Navigation, headers, footers, forms and scripts are stripped first, and only prose-like sentences (6+ words, ends in punctuation, not a run of capitalised menu items) can be quoted. If no such sentence exists the card says only "X is mentioned on this public page."
 3. Attribution is strict. An off-domain page such as a guessed GitHub organisation is only used when the page itself names the company's domain; an unrelated org with a similar name is dropped and supplies no evidence.
 4. Every signal and hypothesis must cite evidence ids that exist in the same bundle.
